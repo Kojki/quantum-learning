@@ -1,6 +1,14 @@
 from qiskit.circuit import Parameter, QuantumCircuit, ClassicalRegister, QuantumRegister
 import tkinter as tk
 from tkinter import ttk
+from qulacs import QuantumState
+from qulacs.gate import H
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+from qiskit.visualization import plot_histogram, plot_state_city
+import qiskit.quantum_info as qi
+from tqdm import tqdm
+import time
 
 
 # ひらがな（および一部記号・英数字）と7ビットバイナリの対応表
@@ -23,47 +31,47 @@ def correspondence_table():
         "00001101": "せ",
         "00001110": "そ",
         "00001111": "た",
-        "00100000": "ち",
-        "00100001": "つ",
-        "00100010": "て",
-        "00100011": "と",
-        "00100100": "な",
-        "00100101": "に",
-        "00100110": "ぬ",
-        "00100111": "ね",
-        "00101000": "の",
-        "00101001": "は",
-        "00101010": "ひ",
-        "00101011": "ふ",
-        "00101100": "へ",
-        "00101101": "ほ",
-        "00101110": "ま",
-        "00101111": "み",
-        "01000000": "む",
-        "01000001": "め",
-        "01000010": "も",
-        "01000011": "や",
-        "01000100": "ゆ",
-        "01000101": "よ",
-        "01000110": "ら",
-        "01000111": "り",
-        "01001000": "る",
-        "01001001": "れ",
-        "01001010": "ろ",
-        "00101011": "わ",
-        "00101100": "を",
-        "00101101": "ん",
-        "00101110": "が",
-        "00101111": "ぎ",
-        "01000000": "ぐ",
-        "01000001": "げ",
-        "01000010": "ご",
-        "01000011": "ざ",
-        "01000100": "じ",
-        "01000101": "ず",
-        "01000110": "ぜ",
-        "01000111": "ぞ",
-        "01001000": "だ",
+        "00010000": "ち",
+        "00010001": "つ",
+        "00010010": "て",
+        "00010011": "と",
+        "00010100": "な",
+        "00010101": "に",
+        "00010110": "ぬ",
+        "00010111": "ね",
+        "00100000": "の",
+        "00100001": "は",
+        "00100010": "ひ",
+        "00100011": "ふ",
+        "00100100": "へ",
+        "00100101": "ほ",
+        "00100110": "ま",
+        "00100111": "み",
+        "00101000": "む",
+        "00101001": "め",
+        "00101010": "も",
+        "00101011": "や",
+        "00101100": "ゆ",
+        "00101101": "よ",
+        "00101110": "ら",
+        "00101111": "り",
+        "00110000": "る",
+        "00110001": "れ",
+        "00110010": "ろ",
+        "00110011": "わ",
+        "00110100": "を",
+        "00110101": "ん",
+        "00110110": "が",
+        "00110111": "ぎ",
+        "00111000": "ぐ",
+        "00111001": "げ",
+        "00111010": "ご",
+        "00111011": "ざ",
+        "00111100": "じ",
+        "00111101": "ず",
+        "00111110": "ぜ",
+        "00111111": "ぞ",
+        "01000000": "だ",
         "01001001": "ぢ",
         "01001010": "づ",
         "01001011": "で",
@@ -220,7 +228,10 @@ def introduction():
 
 def information_input():
     # 入力
-    input_data = input("伝えたいメッセージを入力してください。: ")
+    input_data = input(
+        "最適な長さの文字列を入力してください。それに応じたビット列を生成します。\n"
+        "最終的に残るビット数は1/4程度になります。: "
+    )
     return input_data
 
 
@@ -251,36 +262,93 @@ def decode_message(bit_string, to_str_table):
     return "".join(decoded)
 
 
+# 量子乱数
+def generate_quantum_random_bit():
+    state = QuantumState(1)
+    state.set_zero_state()
+    gate = H(0)
+    gate.update_quantum_state(state)
+
+    # 測定
+    result = state.sampling(1)[0]
+    return result
+
+
+# メイン処理
 selected_mode = introduction()
 
-if selected_mode == "1":
-    print("BB84について扱います。")
+if selected_mode == "BB84":
+    print("BB84プロトコルを開始します")
     to_str_table, to_bit_table = correspondence_table()
     message_original = information_input()
     bit_sequence = encode_message(message_original, to_bit_table)
-    print("ビットへの変換が完了しました:", bit_sequence)
-    print("ビット列の長さ:", len(bit_sequence))
 
-    q = QuantumRegister(len(bit_sequence), "q")
-    circuit = QuantumCircuit(q)
-    for i, bit in enumerate(bit_sequence):
-        if bit == "1":
-            circuit.x(q[i])
+    n_bits = len(bit_sequence)
+    print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
 
+    simulator = AerSimulator()
 
-# 量子乱数
-# ゲート操作
+    alice_bases = []
+    bob_bases = []
+    measured_bits = []
 
-"""
-from qulacs import QuantumState
-from qulacs.gate import H
+    # Qiskit回路の構築
+    for i in range(n_bits):
+        qr = QuantumRegister(1, "q")
+        cr = ClassicalRegister(1, "c")
+        qc = QuantumCircuit(qr, cr)
 
+        # アリスの基底選択
+        a_base = generate_quantum_random_bit()
+        alice_bases.append(a_base)
 
-state = QuantumState(1)
+        # ゲートの適用
+        if bit_sequence[i] == "1":
+            qc.x(0)
+        if a_base == 1:
+            qc.h(0)  # 対角基底
 
-state.set_zero_state()
-gate = H(0)
-gate.update_quantum_state(state)
+        # ボブの基底選択
+        b_base = generate_quantum_random_bit()
+        bob_bases.append(b_base)
 
-count = len(bit_sequence)
-"""
+        if b_base == 1:
+            qc.h(0)
+
+        # 測定
+        qc.measure(0, 0)
+
+        # シミュレーション実行
+        simulator = AerSimulator()
+        compiled_qc = transpile(qc, simulator)
+        job = simulator.run(compiled_qc, shots=1, memory=True)
+        result = job.result()
+        measured_bits.append(result.get_memory()[0])
+
+    # 測定結果のリストを文字列に変換
+    measured_bits_str = "".join(measured_bits)
+
+    # 基底の照合（篩い分け）
+    alice_final_key = ""
+    bob_final_key = ""
+    for i in range(n_bits):
+        if alice_bases[i] == bob_bases[i]:
+            alice_final_key += bit_sequence[i]
+            bob_final_key += measured_bits_str[i]
+
+    for i in tqdm(range(100), desc="実行中"):
+        time.sleep(0.05)  # 何らかの重い処理の代わり
+
+    print("\n--- 実行結果 ---")
+    print("最大50ビットまで表示します。")
+
+    print(f"アリスの最終鍵: {alice_final_key[:50]}...")
+    print(f"ボブの最終鍵: {bob_final_key[:50]}...")
+    print(f"最終鍵の長さ: {len(alice_final_key)}")
+
+    if alice_final_key == bob_final_key:
+        print("\n✅成功：二人の間で共通の鍵が生成されました。")
+    else:
+        # 万が一不一致があれば、ここでエラーを表示
+        diff_count = sum(1 for a, b in zip(alice_final_key, bob_final_key) if a != b)
+        print(f"\n失敗：{diff_count} ビットの不一致があります。")
