@@ -286,49 +286,58 @@ if selected_mode == "BB84":
     n_bits = len(bit_sequence)
     print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
 
-    simulator = AerSimulator()
+    eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
 
+    # 1. 回路の初期化（全ビット分）
+    qr = QuantumRegister(n_bits, "q")
+    cr = ClassicalRegister(n_bits, "c")
+    qc = QuantumCircuit(qr, cr)
     alice_bases = []
     bob_bases = []
-    measured_bits = []
-
-    # Qiskit回路の構築
+    eve_bases = []
+    # Alice（送信準備）
     for i in range(n_bits):
-        qr = QuantumRegister(1, "q")
-        cr = ClassicalRegister(1, "c")
-        qc = QuantumCircuit(qr, cr)
-
-        # アリスの基底選択
         a_base = generate_quantum_random_bit()
         alice_bases.append(a_base)
 
-        # ゲートの適用
         if bit_sequence[i] == "1":
-            qc.x(0)
+            qc.x(i)
         if a_base == 1:
-            qc.h(0)  # 対角基底
+            qc.h(i)
+    qc.barrier()  # 作業終了
+    # Eve（盗聴）
+    if eve_present:
+        for i in range(n_bits):
+            e_base = generate_quantum_random_bit()
+            eve_bases.append(e_base)
 
-        # ボブの基底選択
+            if e_base == 1:
+                qc.h(i)
+            qc.measure(i, i)  # 盗聴
+            # 測定後の辻褄合わせ
+            if e_base == 1:
+                qc.h(i)
+        qc.barrier()  # 作業終了
+    # Bob（受信）
+    for i in range(n_bits):
         b_base = generate_quantum_random_bit()
         bob_bases.append(b_base)
 
         if b_base == 1:
-            qc.h(0)
+            qc.h(i)
+        qc.measure(i, i)  # Bobの測定
+    qc.barrier()  # 作業終了
 
-        # 測定
-        qc.measure(0, 0)
+    # シミュレーション実行
+    simulator = AerSimulator(method="stabilizer")  # 高速化
+    compiled_qc = transpile(qc, simulator)
+    job = simulator.run(compiled_qc, shots=1, memory=True)
+    result = job.result()
 
-        # シミュレーション実行
-        simulator = AerSimulator()
-        compiled_qc = transpile(qc, simulator)
-        job = simulator.run(compiled_qc, shots=1, memory=True)
-        result = job.result()
-        measured_bits.append(result.get_memory()[0])
+    # Qiskitを用いているためビット順を反転
+    measured_bits_str = result.get_memory()[0][::-1]
 
-    # 測定結果のリストを文字列に変換
-    measured_bits_str = "".join(measured_bits)
-
-    # 基底の照合（篩い分け）
+    # 最終鍵の生成
     alice_final_key = ""
     bob_final_key = ""
     for i in range(n_bits):
@@ -336,19 +345,29 @@ if selected_mode == "BB84":
             alice_final_key += bit_sequence[i]
             bob_final_key += measured_bits_str[i]
 
-    for i in tqdm(range(100), desc="実行中"):
-        time.sleep(0.05)  # 何らかの重い処理の代わり
+    for i in tqdm(range(100), desc="最終鍵の生成中…"):
+        time.sleep(0.05)
 
     print("\n--- 実行結果 ---")
     print("最大50ビットまで表示します。")
 
+    print(f"盗聴者の有無: {'あり' if eve_present else 'なし'}")
     print(f"アリスの最終鍵: {alice_final_key[:50]}...")
     print(f"ボブの最終鍵: {bob_final_key[:50]}...")
-    print(f"最終鍵の長さ: {len(alice_final_key)}")
+    print(f"生成された鍵の長さ: {len(alice_final_key)}")
 
+    # 結果
     if alice_final_key == bob_final_key:
-        print("\n✅成功：二人の間で共通の鍵が生成されました。")
+        print("\n✅ 成功：安全な鍵が共有されました。")
     else:
-        # 万が一不一致があれば、ここでエラーを表示
+        # 不一致のビット数とエラー率
+
+        # 不一致のビットをペアにしてカウント
         diff_count = sum(1 for a, b in zip(alice_final_key, bob_final_key) if a != b)
-        print(f"\n失敗：{diff_count} ビットの不一致があります。")
+        error_rate = (
+            (diff_count / len(alice_final_key)) * 100 if len(alice_final_key) > 0 else 0
+        )
+        print(
+            f"\n⚠️ 警告：不一致が {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
+        )
+        print("イブによる盗聴が疑われます。")
