@@ -9,6 +9,15 @@ from qiskit.visualization import plot_histogram, plot_state_city
 import qiskit.quantum_info as qi
 from tqdm import tqdm
 import time
+import matplotlib.pyplot as plt
+from qiskit.primitives import BackendSamplerV2
+from qiskit_aer.noise import NoiseModel
+from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit_ibm_runtime import SamplerV2 as Sampler
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+from qiskit_aer.noise import pauli_error, depolarizing_error
+import numpy as np
+import random
 
 
 # ひらがな（および一部記号・英数字）と7ビットバイナリの対応表
@@ -263,22 +272,68 @@ def decode_message(bit_string, to_str_table):
 
 
 # 量子乱数
-def generate_quantum_random_bit():
+def generate_quantum_random_bit(number_of_bits):
     state = QuantumState(1)
     state.set_zero_state()
     gate = H(0)
     gate.update_quantum_state(state)
 
     # 測定
-    result = state.sampling(1)[0]
+    result = state.sampling(number_of_bits)[0]
     return result
+
+
+# ノイズモデル
+def get_advanced_noise_model(distance_km):
+    noise_model = NoiseModel()
+
+    # 通信路ノイズ
+    # 距離に応じて減衰
+    p_chan = 1 - np.exp(-0.0005 * distance_km)
+    error_chan = depolarizing_error(p_chan, 1)
+    noise_model.add_all_qubit_quantum_error(error_chan, ["h", "x"])
+
+    # 暗計数ノイズ
+    # 0.5%の確率で誤検出
+    p_dark = 0.005
+    error_dark = pauli_error([("X", p_dark), ("I", 1 - p_dark)])
+    noise_model.add_all_qubit_quantum_error(error_dark, "measure")
+
+    return noise_model
+
+
+# QBER解析
+def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2):
+    # 基底が一致しているか
+    matches = [i for i in range(len(alice_bases)) if alice_bases[i] == bob_bases[i]]
+    if not matches:
+        return 0, 0, "", ""
+
+    # サンプルの抽出
+    sample_size = int(len(matches) * sample_ratio)
+    sample_size = max(4, sample_size)
+    sample_sequence = random.sample(matches, sample_size)
+    sample_errors = sum(1 for i in sample_sequence if alice_bits[i] != bob_bits[i])
+    qber = sample_errors / sample_size
+
+    # 最終鍵の生成
+    key_sequence = [i for i in matches if i not in sample_sequence]
+    final_alice_key = "".join([alice_bits[i] for i in key_sequence])
+    final_bob_key = "".join([bob_bits[i] for i in key_sequence])
+
+    return (
+        qber,
+        len(matches),
+        final_alice_key,
+        final_bob_key,
+    )  # エラー率, 一致ビット数, 最終鍵(Alice, Bob)
 
 
 # メイン処理
 selected_mode = introduction()
 
 if selected_mode == "BB84":
-    print("BB84プロトコルを開始します")
+    print("--- BB84プロトコルシミュレーション ---")
     to_str_table, to_bit_table = correspondence_table()
     message_original = information_input()
     bit_sequence = encode_message(message_original, to_bit_table)
@@ -286,18 +341,30 @@ if selected_mode == "BB84":
     n_bits = len(bit_sequence)
     print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
 
+    # 条件設定
+    distance_km = float(input("通信の距離をkm単位で入力してください。: "))
+
     eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
 
-    # 1. 回路の初期化（全ビット分）
-    qr = QuantumRegister(n_bits, "q")
-    cr = ClassicalRegister(n_bits, "c")
-    qc = QuantumCircuit(qr, cr)
     alice_bases = []
     bob_bases = []
     eve_bases = []
+
+    # バッチ処理
+    batch_size = 100
+    for start in range(0, len(bit_sequence), batch_size):
+        end = min(start + batch_size, len(bit_sequence))
+        current_bits = bit_sequence[start:end]
+        n_current = len(current_bits)
+
+    # 回路の初期化（全ビット分）
+    qr = QuantumRegister(n_bits, "q")
+    cr = ClassicalRegister(n_bits, "c")
+    qc = QuantumCircuit(qr, cr)
+
     # Alice（送信準備）
     for i in range(n_bits):
-        a_base = generate_quantum_random_bit()
+        a_base = generate_quantum_random_bit(1)
         alice_bases.append(a_base)
 
         if bit_sequence[i] == "1":
@@ -305,10 +372,11 @@ if selected_mode == "BB84":
         if a_base == 1:
             qc.h(i)
     qc.barrier()  # 作業終了
+
     # Eve（盗聴）
     if eve_present:
         for i in range(n_bits):
-            e_base = generate_quantum_random_bit()
+            e_base = generate_quantum_random_bit(1)
             eve_bases.append(e_base)
 
             if e_base == 1:
@@ -320,7 +388,7 @@ if selected_mode == "BB84":
         qc.barrier()  # 作業終了
     # Bob（受信）
     for i in range(n_bits):
-        b_base = generate_quantum_random_bit()
+        b_base = generate_quantum_random_bit(1)
         bob_bases.append(b_base)
 
         if b_base == 1:
@@ -329,21 +397,24 @@ if selected_mode == "BB84":
     qc.barrier()  # 作業終了
 
     # シミュレーション実行
-    simulator = AerSimulator(method="stabilizer")  # 高速化
-    compiled_qc = transpile(qc, simulator)
-    job = simulator.run(compiled_qc, shots=1, memory=True)
+    noise_model = get_advanced_noise_model(distance_km)
+    simulator = AerSimulator(method="stabilizer", noise_model=noise_model)  # 高速化
+    job = simulator.run(qc, shots=1, memory=True)
     result = job.result()
 
     # Qiskitを用いているためビット順を反転
     measured_bits_str = result.get_memory()[0][::-1]
 
+    alice_bits = bit_sequence
+    bob_bits = measured_bits_str
+
+    qber, key_len, final_alice_key, final_bob_key = analyze_qber(
+        alice_bits, bob_bits, alice_bases, bob_bases
+    )
+
     # 最終鍵の生成
-    alice_final_key = ""
-    bob_final_key = ""
-    for i in range(n_bits):
-        if alice_bases[i] == bob_bases[i]:
-            alice_final_key += bit_sequence[i]
-            bob_final_key += measured_bits_str[i]
+    alice_final_key = final_alice_key
+    bob_final_key = final_bob_key
 
     for i in tqdm(range(100), desc="最終鍵の生成中…"):
         time.sleep(0.05)
@@ -351,10 +422,13 @@ if selected_mode == "BB84":
     print("\n--- 実行結果 ---")
     print("最大50ビットまで表示します。")
 
+    print(f"距離 {distance_km}km")
     print(f"盗聴者の有無: {'あり' if eve_present else 'なし'}")
     print(f"アリスの最終鍵: {alice_final_key[:50]}...")
     print(f"ボブの最終鍵: {bob_final_key[:50]}...")
     print(f"生成された鍵の長さ: {len(alice_final_key)}")
+    print(f"QBER (量子ビット誤り率): {qber * 100:.2f} %")
+    print(f"基底が一致したビット数: {key_len}")
 
     # 結果
     if alice_final_key == bob_final_key:
@@ -368,6 +442,6 @@ if selected_mode == "BB84":
             (diff_count / len(alice_final_key)) * 100 if len(alice_final_key) > 0 else 0
         )
         print(
-            f"\n⚠️ 警告：不一致が {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
+            f"\n⚠️ 警告：不一致なビットが {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
         )
         print("イブによる盗聴が疑われます。")
