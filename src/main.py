@@ -275,7 +275,6 @@ def decode_message(bit_string, to_str_table):
             decoded = "".join(decoded_list)
         else:
             error_count += 1
-            print(f"警告:通信がうまくいっていません。")
             decoded_list.append("?")
 
     if error_count > 0:
@@ -316,6 +315,7 @@ def get_advanced_noise_model(distance_km):
 
 # QBER解析
 def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2):
+    eave_suspected = False
     # 基底が一致しているか
     matches = [
         i
@@ -347,7 +347,7 @@ def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2)
     print(f"信号ビット受信率: {yield_s*100:.2f} %")
     print(f"デコイビット受信率: {yield_d*100:.2f} %")
     if yield_d / yield_s > 1.2:
-        print("⚠️ 警告: 盗聴の可能性があります。")
+        eave_suspected = True
     sample_size = int(len(matches) * sample_ratio)
     sample_size = max(4, sample_size)
     sample_sequence = random.sample(matches, sample_size)
@@ -364,7 +364,8 @@ def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2)
         len(matches),
         final_alice_key,
         final_bob_key,
-    )  # エラー率, 一致ビット数, 最終鍵(Alice, Bob)
+        eave_suspected,
+    )  # エラー率, 一致ビット数, 最終鍵(Alice, Bob),盗聴可能性
 
 
 def assign_labels(n_currents, decoy_ratio=0.1):
@@ -468,7 +469,7 @@ if selected_mode == "BB84":
 
     alice_bits = bit_sequence
     bob_bits = all_measured_bits
-    qber, key_len, final_alice_key, final_bob_key = analyze_qber(
+    qber, key_len, final_alice_key, final_bob_key, eave_suspected = analyze_qber(
         alice_bits, bob_bits, alice_bases, bob_bases
     )
 
@@ -511,3 +512,6 @@ if selected_mode == "BB84":
             f"\n⚠️ 警告：不一致なビットが {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
         )
         print("イブによる盗聴が疑われます。")
+
+    if eave_suspected == True:
+        print("⚠️ 警告: 盗聴の可能性があります。")
