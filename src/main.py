@@ -261,13 +261,25 @@ def encode_message(message_original, to_bit_table):
 def decode_message(bit_string, to_str_table):
     # ビットを文字に変換
     decoded_list = []
+    error_count = 0
+    if len(bit_string) < 8:
+        print(
+            f"警告: 鍵の長さが足りません（現在 {len(bit_string)} ビット）。文字を復元するには8ビット以上必要です。"
+        )
+        return "復元不可能です。"
+
     for i in range(0, len(bit_string), 8):
         bit_chunk = bit_string[i : i + 8]
         if bit_chunk in to_str_table:
             decoded_list.append(to_str_table[bit_chunk])
             decoded = "".join(decoded_list)
         else:
+            error_count += 1
             print(f"警告:通信がうまくいっていません。")
+            decoded_list.append("?")
+
+    if error_count > 0:
+        print(f"警告: 通信がうまくいっていません。")
     return "".join(decoded)
 
 
@@ -305,11 +317,37 @@ def get_advanced_noise_model(distance_km):
 # QBER解析
 def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2):
     # 基底が一致しているか
-    matches = [i for i in range(len(alice_bases)) if alice_bases[i] == bob_bases[i]]
+    matches = [
+        i
+        for i in range(len(alice_bases))
+        if alice_bases[i] == bob_bases[i] and bob_bits[i] != "F"
+    ]
     if not matches:
         return 0, 0, "", ""
 
     # サンプルの抽出
+    s_sent = 0  # Aliceが送ったSignalの総数
+    s_receive = 0  # Fを除いたBobの受信数(Signal)
+    for i in range(len(alice_labels)):
+        if alice_labels[i] == "S":
+            s_sent += 1
+            if bob_bits[i] != "F":
+                s_receive += 1
+    yield_s = s_receive / s_sent if s_sent > 0 else 0
+
+    d_sent = 0  # Aliceが送ったDecoyの総数
+    d_receive = 0  # Fを除いたBobの受信数(Decoy)
+    for i in range(len(alice_labels)):
+        if alice_labels[i] == "D":
+            d_sent += 1
+            if bob_bits[i] != "F":
+                d_receive += 1
+    yield_d = d_receive / d_sent if d_sent > 0 else 0
+
+    print(f"信号ビット受信率: {yield_s*100:.2f} %")
+    print(f"デコイビット受信率: {yield_d*100:.2f} %")
+    if yield_d / yield_s > 1.2:
+        print("⚠️ 警告: 盗聴の可能性があります。")
     sample_size = int(len(matches) * sample_ratio)
     sample_size = max(4, sample_size)
     sample_sequence = random.sample(matches, sample_size)
@@ -329,6 +367,18 @@ def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2)
     )  # エラー率, 一致ビット数, 最終鍵(Alice, Bob)
 
 
+def assign_labels(n_currents, decoy_ratio=0.1):
+    labels = []
+    for _ in range(n_currents):
+        labels.append("D" if random.random() < decoy_ratio else "S")
+    return labels
+
+
+def transmission_loss(distance_km):
+    transmittance = 10 ** (-0.02 * distance_km)
+    return random.random() < transmittance
+
+
 # メイン処理
 selected_mode = introduction()
 
@@ -346,6 +396,7 @@ if selected_mode == "BB84":
 
     eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
 
+    alice_labels = []
     alice_bases = []
     bob_bases = []
     eve_bases = []
@@ -357,7 +408,9 @@ if selected_mode == "BB84":
         end = min(start + batch_size, len(bit_sequence))
         current_bits = bit_sequence[start:end]  # バッチごとに送るビット
         n_current = len(current_bits)  # バッチごとの回路のサイズ
-        print(f"バッチ {batch_idx + 1}: {start}~{end-1}ビット目を処理中...")
+        print(f"バッチ {batch_idx + 1}: {start+1}~{end}ビット目を処理中...")
+        current_batch_labels = assign_labels(n_current, decoy_ratio=0.1)
+        alice_labels.extend(current_batch_labels)
 
         # 各バッチごとに回路を作成
         qr = QuantumRegister(n_current, "q")
@@ -368,7 +421,6 @@ if selected_mode == "BB84":
         for i in range(n_current):
             a_base = generate_quantum_random_bit(1)
             alice_bases.append(a_base)
-
             if current_bits[i] == "1":
                 qc.x(i)
             if a_base == 1:
@@ -403,10 +455,15 @@ if selected_mode == "BB84":
         simulator = AerSimulator(method="stabilizer", noise_model=noise_model)  # 高速化
         job = simulator.run(qc, shots=1, memory=True)
         batch_result = job.result()
-
-        # Qiskitを用いているためビット順を反転
-        measured_bits_str = batch_result.get_memory()[0][::-1]
-        all_measured_bits += measured_bits_str
+        lossy_measured = ""
+        for i in range(n_current):
+            if transmission_loss(distance_km):
+                lossy_measured += batch_result.get_memory()[0][::-1][
+                    i
+                ]  # Qiskitを用いているためビット順を反転
+            else:
+                lossy_measured += "F"  # 損失→F
+        all_measured_bits += lossy_measured
     print("\n全バッチの処理が完了しました。")
 
     alice_bits = bit_sequence
@@ -432,6 +489,12 @@ if selected_mode == "BB84":
     print(f"生成された鍵の長さ: {len(alice_final_key)}")
     print(f"QBER (量子ビット誤り率): {qber * 100:.2f} %")
     print(f"基底が一致したビット数: {key_len}")
+
+    alice_text = decode_message(alice_final_key, to_str_table)
+    bob_text = decode_message(bob_final_key, to_str_table)
+    print("\n--- ビットから復元した鍵 ---")
+    print(f"アリスが送ろうとした鍵: {alice_text}")
+    print(f"ボブが復号した鍵: {bob_text}")
 
     # 結果
     if alice_final_key == bob_final_key:
