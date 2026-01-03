@@ -20,9 +20,11 @@ import numpy as np
 import random
 
 
-# ひらがな（および一部記号・英数字）と7ビットバイナリの対応表
+# ひらがな（および一部記号・英数字）と8ビットバイナリの対応表
 def correspondence_table():
-    # ビット→文字の対応表
+    """ひらがな（および一部記号・英数字）と8ビットバイナリ列の相互変換テーブルを生成する。
+    ここでは8ビット（1バイト）を1文字の単位とする。
+    """
     to_str_table = {
         "00000000": "あ",
         "00000001": "い",
@@ -211,6 +213,12 @@ def correspondence_table():
 
 
 def introduction():
+    """この関数ではツールの紹介と、それを行うための入力を受け取ります。
+
+    Returns:
+        selected_value (str): 選択されたテーマの文字列
+    """
+
     print("このツールでは量子通信に関する簡単なシミュレーションができます。")
     selected_value = {"val": None}
 
@@ -245,7 +253,15 @@ def information_input():
 
 
 def encode_message(message_original, to_bit_table):
-    # 文字をビットに変換
+    """この関数では文字列をビット列に変換します。
+
+    Args: 
+        message_original (str): 入力された文字列
+        to_bit_table (dict): 文字からビット列への変換テーブル
+
+    Returns:
+        encoded (str): 変換後のビット列
+    """
     encoded_list = []
     for character in message_original:
         if character in to_bit_table:
@@ -259,7 +275,14 @@ def encode_message(message_original, to_bit_table):
 
 
 def decode_message(bit_string, to_str_table):
-    # ビットを文字に変換
+    """この関数ではビット列を文字列に変換します。
+
+    Args: 
+        bit_string (str): 入力されたビット列
+        to_str_table (dict): ビット列から文字への変換テーブル
+    Returns:
+        decoded (str): 変換後の文字列
+    """
     decoded_list = []
     error_count = 0
     if len(bit_string) < 8:
@@ -284,18 +307,34 @@ def decode_message(bit_string, to_str_table):
 
 # 量子乱数
 def generate_quantum_random_bit(number_of_bits):
+    """この関数では量子乱数を生成します。
+
+    Args: 
+        number_of_bits (int): 生成するビット数
+
+    Returns:
+        result (int): 0と1からなるビット列（ランダム）
+    """
     state = QuantumState(1)
     state.set_zero_state()
     gate = H(0)
     gate.update_quantum_state(state)
 
     # 測定
-    result = state.sampling(number_of_bits)[0]
+    result: list[int] = state.sampling(number_of_bits)
     return result
 
 
 # ノイズモデル
 def get_advanced_noise_model(distance_km):
+    """この関数では高度なノイズモデルを生成します。
+
+    Args: 
+        distance_km (float): 通信距離（km）
+
+    Returns:
+        noise_model (NoiseModel): 通信路ノイズと暗計数ノイズを含むノイズモデル
+    """
     noise_model = NoiseModel()
 
     # 通信路ノイズ
@@ -313,8 +352,48 @@ def get_advanced_noise_model(distance_km):
     return noise_model
 
 
+# 偶奇判定
+def get_parity(bits):
+    return sum(int(b) for b in bits) % 2
+
+
+# 二分探索(この関連は考えることが多く少し時間がかかりそう)
+def binary_search(a_bits, b_bits, offset=0):
+
+    while (sum(int(a) for a in a_bits) % 2) != (sum(int(b) for b in b_bits) % 2):
+        if len(a_bits) == 1:
+            return offset
+
+        mid = len(a_bits) // 2
+        a_left = a_bits[:mid]
+        b_left = b_bits[:mid]
+        a_right = a_bits[mid:]
+        b_right = b_bits[mid:]
+
+        if (sum(int(a) for a in a_left) % 2) != (sum(int(b) for b in b_right) % 2):
+            return binary_search(a_left, b_left, offset)
+        else:
+            return binary_search(a_right, b_right, offset + mid)
+
+
 # QBER解析
 def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2):
+    """この関数ではQBER解析を行います。
+
+    Args: 
+        alice_bits (str): Aliceが送信したビット列
+        bob_bits (str): Bobが受信したビット列
+        alice_bases (str): Aliceの基底
+        bob_bases (str): Bobの基底
+        sample_ratio (float): サンプルの割合
+
+    Returns:
+        qber (float): 量子ビット誤り率
+        len(matches) (int): 基底が一致したビット数
+        final_alice_key (str): Aliceの最終鍵
+        final_bob_key (str): Bobの最終鍵
+        eave_suspected (bool): 盗聴の可能性
+    """
     eave_suspected = False
     # 基底が一致しているか
     matches = [
@@ -369,6 +448,15 @@ def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2)
 
 
 def assign_labels(n_currents, decoy_ratio=0.1):
+    """この関数ではSignal、Decoyいずれかのラベルを割り当てます。
+
+    Args: 
+        n_currents (int): ラベルを割り当てる数
+        decoy_ratio (float): Decoyの割合
+
+    Returns:
+        labels (str): SとDのラベルのリスト
+    """
     labels = []
     for _ in range(n_currents):
         labels.append("D" if random.random() < decoy_ratio else "S")
@@ -376,6 +464,13 @@ def assign_labels(n_currents, decoy_ratio=0.1):
 
 
 def transmission_loss(distance_km):
+    """この関数では通信路の損失をシミュレートします。
+
+    Args: 
+        distance_km (float): 通信距離（km）
+    Returns:
+        bool: 通信が成功したかどうか （True: 成功, False: 損失）
+    """
     transmittance = 10 ** (-0.02 * distance_km)
     return random.random() < transmittance
 
