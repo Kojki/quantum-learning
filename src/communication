@@ -18,6 +18,7 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_aer.noise import pauli_error, depolarizing_error
 import numpy as np
 import random
+import hashlib
 
 
 # ひらがな（および一部記号・英数字）と8ビットバイナリの対応表
@@ -243,19 +244,25 @@ def introduction():
     return selected_value["val"]
 
 
-def information_input():
-    # 入力
-    input_data = input(
+def information_key_input():
+    # 鍵の入力
+    input_key_data = input(
         "最適な長さの文字列を入力してください。それに応じたビット列を生成します。\n"
         "最終的に残るビット数は1/4程度になります。: "
     )
+    return input_key_data
+
+
+def information_input():
+    # 入力
+    input_data = input("送りたいメッセージを入力してください。: ")
     return input_data
 
 
 def encode_message(message_original, to_bit_table):
     """この関数では文字列をビット列に変換します。
 
-    Args: 
+    Args:
         message_original (str): 入力された文字列
         to_bit_table (dict): 文字からビット列への変換テーブル
 
@@ -277,7 +284,7 @@ def encode_message(message_original, to_bit_table):
 def decode_message(bit_string, to_str_table):
     """この関数ではビット列を文字列に変換します。
 
-    Args: 
+    Args:
         bit_string (str): 入力されたビット列
         to_str_table (dict): ビット列から文字への変換テーブル
     Returns:
@@ -302,14 +309,15 @@ def decode_message(bit_string, to_str_table):
 
     if error_count > 0:
         print(f"警告: 通信がうまくいっていません。")
-    return "".join(decoded)
+
+    decoded = "".join(decoded_list)
+    return decoded
 
 
-# 量子乱数
 def generate_quantum_random_bit(number_of_bits):
     """この関数では量子乱数を生成します。
 
-    Args: 
+    Args:
         number_of_bits (int): 生成するビット数
 
     Returns:
@@ -325,11 +333,10 @@ def generate_quantum_random_bit(number_of_bits):
     return result
 
 
-# ノイズモデル
 def get_advanced_noise_model(distance_km):
-    """この関数では高度なノイズモデルを生成します。
+    """この関数では2つの要素を加味したノイズモデルを生成します。
 
-    Args: 
+    Args:
         distance_km (float): 通信距離（km）
 
     Returns:
@@ -352,113 +359,157 @@ def get_advanced_noise_model(distance_km):
     return noise_model
 
 
-# 偶奇判定
 def get_parity(bits):
+    """ビット列のパリティ（総和が奇数なら1, 偶数なら0）を計算する。
+    Args:
+        bits (str): 対象のビット列。
+    Returns:
+        int: 計算されたパリティ（0 or 1）。
+    """
     return sum(int(b) for b in bits) % 2
 
 
-# 二分探索(この関連は考えることが多く少し時間がかかりそう)
 def binary_search(a_bits, b_bits, offset=0):
+    """この関数では二分探索を用いてエラー箇所を1つ特定します。
+    Args:
+        a_bits (str): アリス側のビットブロック。
+        b_bits (str): ボブ側のビットブロック。
+        offset (int): ブロックの開始位置。
+    Returns:
+        int: エラーの場所。
+    """
+    if len(a_bits) == 1:
+        return offset
 
-    while (sum(int(a) for a in a_bits) % 2) != (sum(int(b) for b in b_bits) % 2):
-        if len(a_bits) == 1:
-            return offset
+    mid = len(a_bits) // 2
+    a_left = a_bits[:mid]
+    b_left = b_bits[:mid]
+    a_right = a_bits[mid:]
+    b_right = b_bits[mid:]
 
-        mid = len(a_bits) // 2
-        a_left = a_bits[:mid]
-        b_left = b_bits[:mid]
-        a_right = a_bits[mid:]
-        b_right = b_bits[mid:]
-
-        if (sum(int(a) for a in a_left) % 2) != (sum(int(b) for b in b_right) % 2):
-            return binary_search(a_left, b_left, offset)
-        else:
-            return binary_search(a_right, b_right, offset + mid)
+    if (sum(int(a) for a in a_left) % 2) != (sum(int(b) for b in b_left) % 2):
+        return binary_search(a_left, b_left, offset)
+    else:
+        return binary_search(a_right, b_right, offset + mid)
 
 
-# QBER解析
-def analyze_qber(alice_bits, bob_bits, alice_bases, bob_bases, sample_ratio=0.2):
-    """この関数ではQBER解析を行います。
+def analyze_qber(
+    alice_bits, bob_bits, alice_bases, bob_bases, alice_labels, sample_ratio=0.2
+):
+    """この関数ではQBER解析を行い、収率と最終鍵を算出します。
 
-    Args: 
-        alice_bits (str): Aliceが送信したビット列
-        bob_bits (str): Bobが受信したビット列
-        alice_bases (str): Aliceの基底
-        bob_bases (str): Bobの基底
-        sample_ratio (float): サンプルの割合
+    Args:
+        alice_bits (str): Aliceが送信した全ビット列
+        bob_bits (str): Bobが受信した全ビット列（'F'を含む）
+        alice_bases (list): Aliceが使用した基底リスト
+        bob_bases (list): Bobが使用した基底リスト
+        alice_labels (list): Aliceが割り当てた S / D ラベル
+        sample_ratio (float): エラー推定のために公開するビットの割合
 
     Returns:
-        qber (float): 量子ビット誤り率
-        len(matches) (int): 基底が一致したビット数
-        final_alice_key (str): Aliceの最終鍵
-        final_bob_key (str): Bobの最終鍵
-        eave_suspected (bool): 盗聴の可能性
+        tuple: (qber, key_len, alice_key, bob_key, eave_suspected)
     """
     eave_suspected = False
-    # 基底が一致しているか
-    matches = [
-        i
-        for i in range(len(alice_bases))
-        if alice_bases[i] == bob_bases[i] and bob_bits[i] != "F"
-    ]
-    if not matches:
-        return 0, 0, "", ""
 
-    # サンプルの抽出
+    # 1. 収率（Yield）の計算（全ビットが対象）
     s_sent = 0  # Aliceが送ったSignalの総数
-    s_receive = 0  # Fを除いたBobの受信数(Signal)
+    s_receive = 0  # 受信成功数(Signal)
+    d_sent = 0  # Aliceが送ったDecoyの総数
+    d_receive = 0  # 受信成功数(Decoy)
+
     for i in range(len(alice_labels)):
         if alice_labels[i] == "S":
             s_sent += 1
             if bob_bits[i] != "F":
                 s_receive += 1
-    yield_s = s_receive / s_sent if s_sent > 0 else 0
-
-    d_sent = 0  # Aliceが送ったDecoyの総数
-    d_receive = 0  # Fを除いたBobの受信数(Decoy)
-    for i in range(len(alice_labels)):
-        if alice_labels[i] == "D":
+        else:
             d_sent += 1
             if bob_bits[i] != "F":
                 d_receive += 1
+
+    yield_s = s_receive / s_sent if s_sent > 0 else 0
     yield_d = d_receive / d_sent if d_sent > 0 else 0
 
+    print(f"\n--- 収率解析 (Decoy Analysis) ---")
     print(f"信号ビット受信率: {yield_s*100:.2f} %")
     print(f"デコイビット受信率: {yield_d*100:.2f} %")
+
+    # PNS攻撃の検知（暫定版）
     if yield_d / yield_s > 1.2:
         eave_suspected = True
-    sample_size = int(len(matches) * sample_ratio)
-    sample_size = max(4, sample_size)
+
+    # 2. フィルタリング（基底が一致 AND ビットを受信）
+    matches = [
+        i
+        for i in range(len(alice_bases))
+        if alice_bases[i] == bob_bases[i] and bob_bits[i] != "F"
+    ]
+
+    if not matches:
+        return 0.0, 0, "", "", eave_suspected
+
+    # 3. サンプリングによるQBER推定
+    sample_size = max(4, int(len(matches) * sample_ratio))
     sample_sequence = random.sample(matches, sample_size)
     sample_errors = sum(1 for i in sample_sequence if alice_bits[i] != bob_bits[i])
     qber = sample_errors / sample_size
 
-    # 最終鍵の生成
+    # 4. 鍵の抽出（サンプルは除外）
     key_sequence = [i for i in matches if i not in sample_sequence]
-    final_alice_key = "".join([alice_bits[i] for i in key_sequence])
-    final_bob_key = "".join([bob_bits[i] for i in key_sequence])
+    alice_key = "".join([alice_bits[i] for i in key_sequence])
+    bob_key = "".join([bob_bits[i] for i in key_sequence])
 
-    return (
-        qber,
-        len(matches),
-        final_alice_key,
-        final_bob_key,
-        eave_suspected,
-    )  # エラー率, 一致ビット数, 最終鍵(Alice, Bob),盗聴可能性
+    key_len = len(alice_key)
+
+    return qber, key_len, alice_key, bob_key, eave_suspected
 
 
-def assign_labels(n_currents, decoy_ratio=0.1):
+def reconcile_errors_binary(alice_key, bob_key, block_size=10):
+    """鍵をブロックに分割し、二分探索を用いて誤り訂正を行います。（本来であれば何回かしなければならない。いったん保留）
+
+    Args:
+        alice_key (str): アリス側の鍵（ビット列）
+        bob_key (str): ボブ側の鍵（ビット列）
+        block_size (int): ブロックあたりのビット数
+
+    Returns:
+        str: 修正後のボブの鍵
+    """
+    bob_key_list = list(bob_key)
+    corrected_count = 0
+
+    # ブロックごとに処理
+    for batch_idx, start in enumerate(range(0, len(alice_key), block_size)):
+        end = min(start + block_size, len(alice_key))
+
+        a_block = alice_key[start:end]
+        b_block = bob_key[start:end]
+
+        # 二分探索
+        if get_parity(a_block) != get_parity(b_block):
+            # エラー箇所を特定
+            error_idx = binary_search(a_block, b_block, start)
+            # Bobのビットを反転
+            bob_key_list[error_idx] = "1" if bob_key_list[error_idx] == "0" else "0"
+            corrected_count += 1
+
+    print(f"\n--- エラー訂正報告 ---")
+    print(f"{corrected_count} 個のエラーを修正しました。")
+    return "".join(bob_key_list)
+
+
+def assign_labels(n_batch, decoy_ratio=0.1):
     """この関数ではSignal、Decoyいずれかのラベルを割り当てます。
 
-    Args: 
-        n_currents (int): ラベルを割り当てる数
+    Args:
+        n_batch (int): ラベルを割り当てる数
         decoy_ratio (float): Decoyの割合
 
     Returns:
         labels (str): SとDのラベルのリスト
     """
     labels = []
-    for _ in range(n_currents):
+    for _ in range(n_batch):
         labels.append("D" if random.random() < decoy_ratio else "S")
     return labels
 
@@ -466,7 +517,7 @@ def assign_labels(n_currents, decoy_ratio=0.1):
 def transmission_loss(distance_km):
     """この関数では通信路の損失をシミュレートします。
 
-    Args: 
+    Args:
         distance_km (float): 通信距離（km）
     Returns:
         bool: 通信が成功したかどうか （True: 成功, False: 損失）
@@ -475,138 +526,202 @@ def transmission_loss(distance_km):
     return random.random() < transmittance
 
 
+def privacy_amplification(alice_second_key, bob_second_key):
+    """この関数ではプライバシー増幅を行います。
+
+    Args:
+        alice_second_key (str): Alice側の鍵（ビット列）
+        bob_second_key (str): Bob側の鍵（ビット列）
+
+    Returns:
+        alice_final_key, bob_final_key: AliceとBobの最終的な鍵（ハッシュ値）
+    """
+    hasher = hashlib.sha256
+    alice_final_key = hasher(alice_second_key.encode()).hexdigest()
+    bob_final_key = hasher(bob_second_key.encode()).hexdigest()
+    alice_final_key, bob_final_key = bin(int(alice_final_key, 16))[2:].zfill(256), bin(
+        int(bob_final_key, 16)
+    )[2:].zfill(256)
+    return alice_final_key, bob_final_key
+
+
 # メイン処理
-selected_mode = introduction()
+def main():
+    selected_mode = introduction()
 
-if selected_mode == "BB84":
-    print("--- BB84プロトコルシミュレーション ---")
-    to_str_table, to_bit_table = correspondence_table()
-    message_original = information_input()
-    bit_sequence = encode_message(message_original, to_bit_table)
+    if selected_mode == "BB84":
+        print("--- BB84プロトコルシミュレーション ---")
+        to_str_table, to_bit_table = correspondence_table()
+        key_original = information_key_input()
+        bit_sequence = encode_message(key_original, to_bit_table)
 
-    n_bits = len(bit_sequence)
-    print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
+        n_bits = len(bit_sequence)
+        print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
 
-    # 条件設定
-    distance_km = float(input("通信の距離をkm単位で入力してください。: "))
+        # 条件設定
+        distance_km = float(input("通信の距離をkm単位で入力してください。: "))
 
-    eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
+        eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
 
-    alice_labels = []
-    alice_bases = []
-    bob_bases = []
-    eve_bases = []
-    all_measured_bits = ""
+        alice_labels = []
+        alice_bases = []
+        bob_bases = []
+        eve_bases = []
+        all_measured_bits = ""
 
-    # バッチ処理
-    batch_size = 100
-    for batch_idx, start in enumerate(range(0, len(bit_sequence), batch_size)):
-        end = min(start + batch_size, len(bit_sequence))
-        current_bits = bit_sequence[start:end]  # バッチごとに送るビット
-        n_current = len(current_bits)  # バッチごとの回路のサイズ
-        print(f"バッチ {batch_idx + 1}: {start+1}~{end}ビット目を処理中...")
-        current_batch_labels = assign_labels(n_current, decoy_ratio=0.1)
-        alice_labels.extend(current_batch_labels)
+        # バッチ処理
+        batch_size = 100
+        for batch_idx, start in enumerate(range(0, n_bits, batch_size)):
+            end = min(start + batch_size, n_bits)
+            batch_bits = bit_sequence[start:end]
+            n_batch = len(batch_bits)  # バッチごとに送るビット数
+            print(f"バッチ {batch_idx + 1}: {start+1}~{end}ビット目を処理中...")
+            current_batch_labels = assign_labels(n_batch, decoy_ratio=0.1)
+            alice_labels.extend(current_batch_labels)
 
-        # 各バッチごとに回路を作成
-        qr = QuantumRegister(n_current, "q")
-        cr = ClassicalRegister(n_current, "c")
-        qc = QuantumCircuit(qr, cr)
+            # 各バッチごとに回路を作成
+            qr = QuantumRegister(n_batch, "q")
+            cr = ClassicalRegister(n_batch, "c")
+            qc = QuantumCircuit(qr, cr)
 
-        # Alice（送信準備）
-        for i in range(n_current):
-            a_base = generate_quantum_random_bit(1)
-            alice_bases.append(a_base)
-            if current_bits[i] == "1":
-                qc.x(i)
-            if a_base == 1:
-                qc.h(i)
-        qc.barrier()  # 作業終了
-
-        # Eve（盗聴）
-        if eve_present:
-            for i in range(n_current):
-                e_base = generate_quantum_random_bit(1)
-                eve_bases.append(e_base)
-
-                if e_base == 1:
-                    qc.h(i)
-                qc.measure(i, i)  # 盗聴
-                # 測定後の辻褄合わせ
-                if e_base == 1:
+            # Alice（送信準備）
+            for i in range(n_batch):
+                a_base = generate_quantum_random_bit(1)
+                alice_bases.append(a_base)
+                if batch_bits[i] == "1":
+                    qc.x(i)
+                if a_base == 1:
                     qc.h(i)
             qc.barrier()  # 作業終了
-        # Bob（受信）
-        for i in range(n_current):
-            b_base = generate_quantum_random_bit(1)
-            bob_bases.append(b_base)
 
-            if b_base == 1:
-                qc.h(i)
-            qc.measure(i, i)  # Bobの測定
-        qc.barrier()  # 作業終了
+            # Eve（盗聴）
+            if eve_present:
+                for i in range(n_batch):
+                    e_base = generate_quantum_random_bit(1)
+                    eve_bases.append(e_base)
 
-        # シミュレーション実行
-        noise_model = get_advanced_noise_model(distance_km)
-        simulator = AerSimulator(method="stabilizer", noise_model=noise_model)  # 高速化
-        job = simulator.run(qc, shots=1, memory=True)
-        batch_result = job.result()
-        lossy_measured = ""
-        for i in range(n_current):
-            if transmission_loss(distance_km):
-                lossy_measured += batch_result.get_memory()[0][::-1][
-                    i
-                ]  # Qiskitを用いているためビット順を反転
-            else:
-                lossy_measured += "F"  # 損失→F
-        all_measured_bits += lossy_measured
-    print("\n全バッチの処理が完了しました。")
+                    if e_base == 1:
+                        qc.h(i)
+                    qc.measure(i, i)  # 盗聴
+                    # 測定後の辻褄合わせ
+                    if e_base == 1:
+                        qc.h(i)
+                qc.barrier()  # 作業終了
+            # Bob（受信）
+            for i in range(n_batch):
+                b_base = generate_quantum_random_bit(1)
+                bob_bases.append(b_base)
 
-    alice_bits = bit_sequence
-    bob_bits = all_measured_bits
-    qber, key_len, final_alice_key, final_bob_key, eave_suspected = analyze_qber(
-        alice_bits, bob_bits, alice_bases, bob_bases
-    )
+                if b_base == 1:
+                    qc.h(i)
+                qc.measure(i, i)  # Bobの測定
+            qc.barrier()  # 作業終了
 
-    # 最終鍵の生成
-    alice_final_key = final_alice_key
-    bob_final_key = final_bob_key
+            # シミュレーション実行
+            noise_model = get_advanced_noise_model(distance_km)
+            simulator = AerSimulator(
+                method="stabilizer", noise_model=noise_model
+            )  # 高速化
+            job = simulator.run(qc, shots=1, memory=True)
+            batch_result = job.result()
+            lossy_measured = ""
+            for i in range(n_batch):
+                if transmission_loss(distance_km):
+                    lossy_measured += batch_result.get_memory()[0][::-1][
+                        i
+                    ]  # Qiskitを用いているためビット順を反転
+                else:
+                    lossy_measured += "F"  # 損失→F
+            all_measured_bits += lossy_measured
+        print("\n全バッチの処理が完了しました。")
 
-    for i in tqdm(range(100), desc="最終鍵の生成中…"):
-        time.sleep(0.05)
+        alice_bits = bit_sequence
+        bob_bits = all_measured_bits
 
-    print("\n--- 実行結果 ---")
-    print("最大50ビットまで表示します。")
-
-    print(f"距離 {distance_km}km")
-    print(f"盗聴者の有無: {'あり' if eve_present else 'なし'}")
-    print(f"アリスの最終鍵: {alice_final_key[:50]}...")
-    print(f"ボブの最終鍵: {bob_final_key[:50]}...")
-    print(f"生成された鍵の長さ: {len(alice_final_key)}")
-    print(f"QBER (量子ビット誤り率): {qber * 100:.2f} %")
-    print(f"基底が一致したビット数: {key_len}")
-
-    alice_text = decode_message(alice_final_key, to_str_table)
-    bob_text = decode_message(bob_final_key, to_str_table)
-    print("\n--- ビットから復元した鍵 ---")
-    print(f"アリスが送ろうとした鍵: {alice_text}")
-    print(f"ボブが復号した鍵: {bob_text}")
-
-    # 結果
-    if alice_final_key == bob_final_key:
-        print("\n✅ 成功：安全な鍵が共有されました。")
-    else:
-        # 不一致のビット数とエラー率
-
-        # 不一致のビットをペアにしてカウント
-        diff_count = sum(1 for a, b in zip(alice_final_key, bob_final_key) if a != b)
-        error_rate = (
-            (diff_count / len(alice_final_key)) * 100 if len(alice_final_key) > 0 else 0
+        qber, key_len, alice_key, bob_key, eave_suspected = analyze_qber(
+            alice_bits, bob_bits, alice_bases, bob_bases, alice_labels
         )
+        alice_second_key = alice_key
+        if len(bob_key) > 0:
+            bob_second_key = reconcile_errors_binary(alice_key, bob_key, block_size=10)
+        else:
+            print("⚠️ 警告: ボブの鍵が空です。")
+
+        alice_final_key, bob_final_key = privacy_amplification(
+            alice_second_key, bob_second_key
+        )
+
+        # 最終鍵の生成
+        for i in tqdm(range(100), desc="最終鍵の生成中…"):
+            time.sleep(0.05)
+
+        print("\n--- 実行結果 ---")
+        print("最大50ビットまで表示します。")
+
+        print(f"距離 {distance_km}km")
+        print(f"盗聴者の有無: {'あり' if eve_present else 'なし'}")
+        print(f"アリスの最終鍵: {alice_final_key[:50]}...")
+        print(f"ボブの最終鍵: {bob_final_key[:50]}...")
+        print(f"生成された鍵の長さ: {len(alice_final_key)}")
+        print(f"QBER (量子ビット誤り率): {qber * 100:.2f} %")
+        print(f"基底が一致したビット数: {key_len}")
+
+        print("\n--- ビットから復元した鍵 ---")
+        print(f"アリスが送ろうとした鍵: {alice_final_key}")
+        print(f"ボブが復号した鍵: {bob_final_key}")
+
+        # 結果
+        if alice_final_key == bob_final_key and len(alice_final_key) > 0:
+            print("\n✅ 成功：安全な鍵が共有されました。")
+        else:
+            # 不一致のビット数とエラー率
+
+            # 不一致のビットをペアにしてカウント
+            diff_count = sum(
+                1 for a, b in zip(alice_final_key, bob_final_key) if a != b
+            )
+            error_rate = (
+                (diff_count / len(alice_final_key)) * 100
+                if len(alice_final_key) > 0
+                else 0
+            )
+            print(
+                f"\n⚠️ 警告：不一致なビットが {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
+            )
+            print("イブによる盗聴が疑われます。")
+
+        if eave_suspected == True:
+            print("⚠️ 警告: 盗聴の可能性があります。")
+
         print(
-            f"\n⚠️ 警告：不一致なビットが {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
+            f"\n鍵の作成は完了しました。さらに共有した鍵を使ってメッセージを送ります。"
         )
-        print("イブによる盗聴が疑われます。")
 
-    if eave_suspected == True:
-        print("⚠️ 警告: 盗聴の可能性があります。")
+        message_original = information_input()
+        message = encode_message(message_original, to_bit_table)
+        encrypted_bits = "".join(
+            [
+                str(int(message[i]) ^ int(alice_final_key[i % 256]))
+                for i in range(len(message))
+            ]
+        )
+        print(f"送信中の暗号文（イブに見える内容）: {encrypted_bits[:50]}...")
+
+        decrypted_bits = "".join(
+            [
+                str(int(encrypted_bits[i]) ^ int(bob_final_key[i % 256]))
+                for i in range(len(encrypted_bits))
+            ]
+        )
+        decrypted_text = decode_message(decrypted_bits, to_str_table)
+
+        if decrypted_text == message_original:
+            print("\n✅ 成功：メッセージが正しく復号されました。")
+            print(f"ボブが受信した内容: {decrypted_text}")
+        else:
+            print("\n⚠️ 警告：メッセージの復号に失敗しました。")
+            print(f"ボブが受信した内容: {decrypted_text}")
+
+
+if __name__ == "__main__":
+    main()

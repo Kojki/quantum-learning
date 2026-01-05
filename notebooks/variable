@@ -1,0 +1,31 @@
+'''
+変数名　まとめ
+to_bit_table(dictionary) : 1文字→8ビット（暗号化）
+to_str_table(dictionary) : 8ビット→1文字（復号化）
+
+
+message_original(string) : 入力されたメッセージ(Alice側)
+alice_bits(string) : Aliceが送ったビット列 == bit_sequence
+bob_bits(string) : Bobが受け取ったビット列
+alice_bases(string) : Aliceが使用した基底列
+bob_bases(string) : Bobが使用した基底列
+decoded (string) : 復号化されたメッセージ（Bob側）
+
+number_of_bits(integer) : 量子乱数のビット数
+result(integer) : 量子乱数生成の結果
+
+distance_km(float) : 通信距離（km）
+noise_model(Model) : ノイズモデル
+
+
+samble_ratio(float) : サンプリング比率
+qber(float) : 量子ビット誤り率
+
+alice_final_key(string) : Aliceの最終鍵
+bob_final_key(string) : Bobの最終鍵
+
+eave_suspected(bool) : 盗聴の可能性
+
+n_bits(integer) : ビット数
+n_batch(integer) : バッチごとのビット数
+'''
