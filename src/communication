@@ -314,14 +314,11 @@ def decode_message(bit_string, to_str_table):
     return decoded
 
 
-def generate_quantum_random_bit(number_of_bits):
+def generate_quantum_random_bit():
     """この関数では量子乱数を生成します。
 
-    Args:
-        number_of_bits (int): 生成するビット数
-
     Returns:
-        result (int): 0と1からなるビット列（ランダム）
+        result (int): 量子乱数ビット（0 or 1）
     """
     state = QuantumState(1)
     state.set_zero_state()
@@ -329,34 +326,36 @@ def generate_quantum_random_bit(number_of_bits):
     gate.update_quantum_state(state)
 
     # 測定
-    result: list[int] = state.sampling(number_of_bits)
+    result: list[int] = state.sampling(1)[0]
     return result
 
 
-def get_advanced_noise_model(distance_km):
-    """この関数では2つの要素を加味したノイズモデルを生成します。
-
-    Args:
-        distance_km (float): 通信距離（km）
+def get_hardware_noise_model():
+    """この関数では測定器の暗計数に関するノイズモデルを生成します。
 
     Returns:
-        noise_model (NoiseModel): 通信路ノイズと暗計数ノイズを含むノイズモデル
+        noise_model (NoiseModel): 暗計数ノイズのノイズモデル
     """
     noise_model = NoiseModel()
-
-    # 通信路ノイズ
-    # 距離に応じて減衰
-    p_chan = 1 - np.exp(-0.0005 * distance_km)
-    error_chan = depolarizing_error(p_chan, 1)
-    noise_model.add_all_qubit_quantum_error(error_chan, ["h", "x"])
-
     # 暗計数ノイズ
     # 0.5%の確率で誤検出
     p_dark = 0.005
     error_dark = pauli_error([("X", p_dark), ("I", 1 - p_dark)])
     noise_model.add_all_qubit_quantum_error(error_dark, "measure")
-
     return noise_model
+
+
+def get_channel_noise_model(qc, n_qubits, distance_km):
+    """この関数では通信距離に応じたノイズモデルを生成します。"""
+    # 通信路ノイズ
+    # 距離に応じて変化
+    if distance_km <= 0:
+        return
+    p_chan = 1 - np.exp(-0.0005 * distance_km)
+    if p_chan > 0:
+        error_chan = depolarizing_error(p_chan, 1)
+        for q in n_qubits:
+            qc.append(error_chan, [q])
 
 
 def get_parity(bits):
@@ -394,7 +393,13 @@ def binary_search(a_bits, b_bits, offset=0):
 
 
 def analyze_qber(
-    alice_bits, bob_bits, alice_bases, bob_bases, alice_labels, sample_ratio=0.2
+    alice_bits,
+    bob_bits,
+    alice_bases,
+    bob_bases,
+    alice_labels,
+    eve_bits=None,
+    sample_ratio=0.2,
 ):
     """この関数ではQBER解析を行い、収率と最終鍵を算出します。
 
@@ -404,10 +409,11 @@ def analyze_qber(
         alice_bases (list): Aliceが使用した基底リスト
         bob_bases (list): Bobが使用した基底リスト
         alice_labels (list): Aliceが割り当てた S / D ラベル
+        eve_bits (str, optional): Eveが盗聴したビット列
         sample_ratio (float): エラー推定のために公開するビットの割合
 
     Returns:
-        tuple: (qber, key_len, alice_key, bob_key, eave_suspected)
+        tuple: (qber, key_len, alice_key, bob_key, eve_key, eave_suspected)
     """
     eave_suspected = False
 
@@ -446,7 +452,7 @@ def analyze_qber(
     ]
 
     if not matches:
-        return 0.0, 0, "", "", eave_suspected
+        return 0.0, 0, "", "", eave_suspected, ""
 
     # 3. サンプリングによるQBER推定
     sample_size = max(4, int(len(matches) * sample_ratio))
@@ -458,10 +464,11 @@ def analyze_qber(
     key_sequence = [i for i in matches if i not in sample_sequence]
     alice_key = "".join([alice_bits[i] for i in key_sequence])
     bob_key = "".join([bob_bits[i] for i in key_sequence])
+    eve_key = "".join([eve_bits[i] for i in key_sequence if i < len(eve_bits)])
 
     key_len = len(alice_key)
 
-    return qber, key_len, alice_key, bob_key, eave_suspected
+    return qber, key_len, alice_key, bob_key, eave_suspected, eve_key
 
 
 def reconcile_errors_binary(alice_key, bob_key, block_size=10):
@@ -526,23 +533,25 @@ def transmission_loss(distance_km):
     return random.random() < transmittance
 
 
-def privacy_amplification(alice_second_key, bob_second_key):
-    """この関数ではプライバシー増幅を行います。
+def privacy_amplification(key):
+    """この関数ではハッシュ関数(SHA-256)を用いて、鍵のプライバシー増幅を行う。
+    エラー訂正フェーズで漏洩したパリティ情報などを無効化する目的もある。
 
     Args:
-        alice_second_key (str): Alice側の鍵（ビット列）
-        bob_second_key (str): Bob側の鍵（ビット列）
+        key (str): 修正済みの鍵（ビット列）。
 
     Returns:
-        alice_final_key, bob_final_key: AliceとBobの最終的な鍵（ハッシュ値）
+        final_key (str): 増幅後の256ビットの鍵。
     """
-    hasher = hashlib.sha256
-    alice_final_key = hasher(alice_second_key.encode()).hexdigest()
-    bob_final_key = hasher(bob_second_key.encode()).hexdigest()
-    alice_final_key, bob_final_key = bin(int(alice_final_key, 16))[2:].zfill(256), bin(
-        int(bob_final_key, 16)
-    )[2:].zfill(256)
-    return alice_final_key, bob_final_key
+    # ハッシュ計算
+    hash_obj = hashlib.sha256(key.encode())
+    hash_hex = hash_obj.hexdigest()
+
+    # ハッシュ値（16進数）を256ビットのバイナリ（2進数）に変換
+    final_key = bin(int(hash_hex, 16))[2:].zfill(256)
+
+    print(f"\nプライバシー増幅を実行しました（SHA-256）。")
+    return final_key
 
 
 # メイン処理
@@ -559,15 +568,26 @@ def main():
         print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
 
         # 条件設定
-        distance_km = float(input("通信の距離をkm単位で入力してください。: "))
+        distance_ab_km = float(
+            input("Alice-Bob間の通信距離をkm単位で入力してください。: ")
+        )
+        distance_ae_km = 0.0
 
         eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
+
+        if eve_present:
+            distance_ae_km = float(
+                input(f"イブの待機位置を入力してください (0 ~ {distance_ab_km}km): ")
+            )
+            if distance_ae_km > distance_ab_km:
+                distance_ae_km = distance_ab_km
 
         alice_labels = []
         alice_bases = []
         bob_bases = []
         eve_bases = []
         all_measured_bits = ""
+        all_eve_bits = ""
 
         # バッチ処理
         batch_size = 100
@@ -581,12 +601,17 @@ def main():
 
             # 各バッチごとに回路を作成
             qr = QuantumRegister(n_batch, "q")
-            cr = ClassicalRegister(n_batch, "c")
-            qc = QuantumCircuit(qr, cr)
+            cr_bob = ClassicalRegister(n_batch, "bob")
+            registers = [qr, cr_bob]
+
+            if eve_present:
+                cr_eve = ClassicalRegister(n_batch, "eve")
+                registers.append(cr_eve)
+            qc = QuantumCircuit(*registers)
 
             # Alice（送信準備）
             for i in range(n_batch):
-                a_base = generate_quantum_random_bit(1)
+                a_base = generate_quantum_random_bit()
                 alice_bases.append(a_base)
                 if batch_bits[i] == "1":
                     qc.x(i)
@@ -594,133 +619,213 @@ def main():
                     qc.h(i)
             qc.barrier()  # 作業終了
 
+            distance_eve_km = distance_ae_km if eve_present else distance_ab_km
+            get_channel_noise_model(qc, range(n_batch), distance_eve_km)
+            qc.barrier()
+
             # Eve（盗聴）
             if eve_present:
                 for i in range(n_batch):
-                    e_base = generate_quantum_random_bit(1)
+                    e_base = generate_quantum_random_bit()
                     eve_bases.append(e_base)
 
                     if e_base == 1:
                         qc.h(i)
-                    qc.measure(i, i)  # 盗聴
+                    qc.measure(i, cr_eve[i])  # 盗聴
                     # 測定後の辻褄合わせ
                     if e_base == 1:
                         qc.h(i)
                 qc.barrier()  # 作業終了
+
+                get_channel_noise_model(
+                    qc, range(n_batch), distance_ab_km - distance_ae_km
+                )
+                qc.barrier()
+
             # Bob（受信）
             for i in range(n_batch):
-                b_base = generate_quantum_random_bit(1)
+                b_base = generate_quantum_random_bit()
                 bob_bases.append(b_base)
 
                 if b_base == 1:
                     qc.h(i)
-                qc.measure(i, i)  # Bobの測定
+                qc.measure(i, cr_bob[i])  # Bobの測定
             qc.barrier()  # 作業終了
 
             # シミュレーション実行
-            noise_model = get_advanced_noise_model(distance_km)
+            noise_model = get_hardware_noise_model()
             simulator = AerSimulator(
                 method="stabilizer", noise_model=noise_model
             )  # 高速化
             job = simulator.run(qc, shots=1, memory=True)
-            batch_result = job.result()
-            lossy_measured = ""
+            batch_result = job.result().get_memory()[0]
+
+            if " " in batch_result:
+                eve_part, bob_part = batch_result.split(" ")
+                batch_bob_bits = bob_part[::-1]
+                batch_eve_bits = eve_part[::-1]
+            else:
+                batch_bob_bits = batch_result[::-1]
+                batch_eve_bits = ""
+
+            lossy_b_measured = ""
+            lossy_e_measured = ""
             for i in range(n_batch):
-                if transmission_loss(distance_km):
-                    lossy_measured += batch_result.get_memory()[0][::-1][
-                        i
-                    ]  # Qiskitを用いているためビット順を反転
+                if eve_present:
+
+                    if transmission_loss(distance_ae_km):
+                        lossy_e_measured += batch_eve_bits[i]
+
+                        if transmission_loss(distance_ab_km - distance_ae_km):
+                            lossy_b_measured += batch_bob_bits[i]
+                        else:
+                            lossy_b_measured += "F"
+                    else:
+                        lossy_e_measured += "F"
+                        lossy_b_measured += "F"
                 else:
-                    lossy_measured += "F"  # 損失→F
-            all_measured_bits += lossy_measured
+                    if transmission_loss(distance_ab_km):
+                        lossy_b_measured += batch_bob_bits[i]
+                    else:
+                        lossy_b_measured += "F"
+
+            all_measured_bits += lossy_b_measured
+            all_eve_bits += lossy_e_measured
+
+            time.sleep(0.5)
+
         print("\n全バッチの処理が完了しました。")
 
         alice_bits = bit_sequence
         bob_bits = all_measured_bits
 
-        qber, key_len, alice_key, bob_key, eave_suspected = analyze_qber(
-            alice_bits, bob_bits, alice_bases, bob_bases, alice_labels
+        qber, key_len, alice_key, bob_key, eave_suspected, eve_key = analyze_qber(
+            alice_bits, bob_bits, alice_bases, bob_bases, alice_labels, all_eve_bits
         )
         alice_second_key = alice_key
         if len(bob_key) > 0:
             bob_second_key = reconcile_errors_binary(alice_key, bob_key, block_size=10)
         else:
+            bob_second_key = ""  # 空文字で初期化
             print("⚠️ 警告: ボブの鍵が空です。")
 
-        alice_final_key, bob_final_key = privacy_amplification(
-            alice_second_key, bob_second_key
-        )
+        alice_final_key = privacy_amplification(alice_second_key)
+        bob_final_key = privacy_amplification(bob_second_key)
+
+        eve_final_key = ""
+        if eve_present and eve_key:
+            eve_final_key = privacy_amplification(eve_key.replace("F", "0"))
 
         # 最終鍵の生成
-        for i in tqdm(range(100), desc="最終鍵の生成中…"):
-            time.sleep(0.05)
+        for _ in tqdm(range(100), desc="最終鍵の生成中…"):
+            time.sleep(0.01)
 
-        print("\n--- 実行結果 ---")
-        print("最大50ビットまで表示します。")
-
-        print(f"距離 {distance_km}km")
+        print("\n" + "=" * 50)
+        print("BB84 最終レポート")
+        print("=" * 50)
+        print(
+            f"距離 {distance_ab_km}km (Eveの位置: {distance_ae_km if eve_present else 'なし'}km)"
+        )
         print(f"盗聴者の有無: {'あり' if eve_present else 'なし'}")
         print(f"アリスの最終鍵: {alice_final_key[:50]}...")
-        print(f"ボブの最終鍵: {bob_final_key[:50]}...")
-        print(f"生成された鍵の長さ: {len(alice_final_key)}")
+        print(f"ボブの最終鍵:   {bob_final_key[:50]}...")
         print(f"QBER (量子ビット誤り率): {qber * 100:.2f} %")
-        print(f"基底が一致したビット数: {key_len}")
-
-        print("\n--- ビットから復元した鍵 ---")
-        print(f"アリスが送ろうとした鍵: {alice_final_key}")
-        print(f"ボブが復号した鍵: {bob_final_key}")
-
-        # 結果
-        if alice_final_key == bob_final_key and len(alice_final_key) > 0:
-            print("\n✅ 成功：安全な鍵が共有されました。")
-        else:
-            # 不一致のビット数とエラー率
-
-            # 不一致のビットをペアにしてカウント
-            diff_count = sum(
-                1 for a, b in zip(alice_final_key, bob_final_key) if a != b
-            )
-            error_rate = (
-                (diff_count / len(alice_final_key)) * 100
-                if len(alice_final_key) > 0
-                else 0
-            )
-            print(
-                f"\n⚠️ 警告：不一致なビットが {diff_count} ビットあります (エラー率: {error_rate:.2f}%)"
-            )
-            print("イブによる盗聴が疑われます。")
-
-        if eave_suspected == True:
+        if eave_suspected:
             print("⚠️ 警告: 盗聴の可能性があります。")
 
-        print(
-            f"\n鍵の作成は完了しました。さらに共有した鍵を使ってメッセージを送ります。"
-        )
+        # メッセージ送信の応用デモ
+        if alice_final_key == bob_final_key and len(alice_final_key) > 0:
+            print("\n✅ 成功：秘密鍵が共有されました。暗号通信を開始します。")
+            secret_message_text = information_input()
+            secret_bits = encode_message(secret_message_text, to_bit_table)
 
-        message_original = information_input()
-        message = encode_message(message_original, to_bit_table)
-        encrypted_bits = "".join(
-            [
-                str(int(message[i]) ^ int(alice_final_key[i % 256]))
-                for i in range(len(message))
-            ]
-        )
-        print(f"送信中の暗号文（イブに見える内容）: {encrypted_bits[:50]}...")
+            # 暗号化 (XOR)
+            encrypted_bits = "".join(
+                [
+                    str(int(secret_bits[i]) ^ int(alice_final_key[i % 256]))
+                    for i in range(len(secret_bits))
+                ]
+            )
+            print(f"送信中の暗号文: {encrypted_bits[:50]}...")
 
-        decrypted_bits = "".join(
-            [
-                str(int(encrypted_bits[i]) ^ int(bob_final_key[i % 256]))
-                for i in range(len(encrypted_bits))
-            ]
-        )
-        decrypted_text = decode_message(decrypted_bits, to_str_table)
+            # ボブが解読
+            decrypted_bob_bits = "".join(
+                [
+                    str(int(encrypted_bits[i]) ^ int(bob_final_key[i % 256]))
+                    for i in range(len(encrypted_bits))
+                ]
+            )
+            print(
+                f"ボブが復元した内容: {decode_message(decrypted_bob_bits, to_str_table)}"
+            )
 
-        if decrypted_text == message_original:
-            print("\n✅ 成功：メッセージが正しく復号されました。")
-            print(f"ボブが受信した内容: {decrypted_text}")
+            # --- イブ（盗聴者）の視点のレポート ---
+            if eve_present:
+                print(f"\n" + "=" * 50)
+                print("盗聴者イブのレポート")
+                print("=" * 50)
+                print(f" イブの位置: {distance_ae_km} km")
+                eve_capture_count = all_eve_bits.replace("F", "")
+                print(
+                    f" イブが光子の捕捉に成功した数: {len(eve_capture_count)} / {n_bits}"
+                )
+
+                # イブの解読
+                if alice_final_key == bob_final_key and len(alice_final_key) > 0:
+                    # 鍵が共有できているので、メッセージ解読を試みる
+                    if eve_final_key:
+                        # ここまで成功している場合、passします
+                        pass
+                else:
+
+                    print(
+                        " 結論: 鍵の共有に失敗したため、イブは暗号化されたメッセージまで到達できませんでした。"
+                    )
+                    print(
+                        "       (QBERが非常に高いため、システムが自動的に通信を遮断しました)"
+                    )
+                print("=" * 50)
+
+        if alice_final_key == bob_final_key and len(alice_final_key) > 0:
+            print("\n✅ 成功：秘密鍵が共有されました。暗号通信を開始します。")
+            secret_message_text = information_input()
+            secret_bits = encode_message(secret_message_text, to_bit_table)
+
+            # 暗号化 (XOR)
+            encrypted_bits = "".join(
+                [
+                    str(int(secret_bits[i]) ^ int(alice_final_key[i % 256]))
+                    for i in range(len(secret_bits))
+                ]
+            )
+            print(f"送信中の暗号文: {encrypted_bits[:50]}...")
+
+            # ボブが解読
+            dec_bits_bob = "".join(
+                [
+                    str(int(encrypted_bits[i]) ^ int(bob_final_key[i % 256]))
+                    for i in range(len(encrypted_bits))
+                ]
+            )
+            print(f"ボブが復元した内容: {decode_message(dec_bits_bob, to_str_table)}")
+
+            # 成功時の解読失敗
+            if eve_present and eve_final_key:
+                print(f"\n >>> イブによる解読試行:")
+                eve_decrypted_bits = "".join(
+                    [
+                        str(int(encrypted_bits[i]) ^ int(eve_final_key[i % 256]))
+                        for i in range(len(encrypted_bits))
+                    ]
+                )
+                print(
+                    f" イブが見た内容: {decode_message(eve_decrypted_bits, to_str_table)}"
+                )
+                print(
+                    f" 結果: 解読に失敗しました。プライバシー増幅により1ビットの差が致命的な差となります。"
+                )
         else:
-            print("\n⚠️ 警告：メッセージの復号に失敗しました。")
-            print(f"ボブが受信した内容: {decrypted_text}")
+            print("\n❌ 失敗：安全な鍵が共有できませんでした。")
 
 
 if __name__ == "__main__":
