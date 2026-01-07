@@ -472,7 +472,7 @@ def analyze_qber(
 
 
 def reconcile_errors_binary(alice_key, bob_key, block_size=10):
-    """鍵をブロックに分割し、二分探索を用いて誤り訂正を行います。（本来であれば何回かしなければならない。いったん保留）
+    """鍵をブロックに分割し、二分探索を用いて誤り訂正を行います。
 
     Args:
         alice_key (str): アリス側の鍵（ビット列）
@@ -499,10 +499,55 @@ def reconcile_errors_binary(alice_key, bob_key, block_size=10):
             # Bobのビットを反転
             bob_key_list[error_idx] = "1" if bob_key_list[error_idx] == "0" else "0"
             corrected_count += 1
-
     print(f"\n--- エラー訂正報告 ---")
     print(f"{corrected_count} 個のエラーを修正しました。")
     return "".join(bob_key_list)
+
+    # イブ
+
+
+def reconcile_errors_e_binary(alice_key, bob_key, eve_key, block_size=10):
+    """鍵をブロックに分割し、二分探索を用いて誤り訂正を行います。(イブ用)
+
+    Args:
+        alice_key (str): アリス側の鍵（ビット列）
+        bob_key (str): ボブ側の鍵（ビット列）
+        eve_key (str): イブ側の鍵（ビット列）
+        block_size (int): ブロックあたりのビット数
+
+    Returns:
+        str: 修正後のイブの鍵
+    """
+    eve_key_list = list(eve_key)
+    corrected_count = 0
+
+    # ブロックごとに処理
+    count = 0
+    for start in range(0, len(alice_key), block_size):
+        end = min(start + block_size, len(alice_key))
+        a_block = alice_key[start:end]
+        b_block = bob_key[start:end]
+        e_block = "".join(eve_key_list[start:end])
+
+        # ボブがエラーを報告した場合
+        if get_parity(a_block) != get_parity(b_block):
+            # イブが自分もエラーだと気づいた場合
+            if get_parity(a_block) != get_parity(e_block):
+                idx = binary_search(a_block, e_block, start)
+                eve_key_list[idx] = "1" if eve_key_list[idx] == "0" else "0"
+                count += 1
+        a_block = alice_key[start:end]
+        e_block = "".join(eve_key_list[start:end])
+        if get_parity(a_block) != get_parity(e_block):
+            # エラー箇所を特定
+            error_idx = binary_search(a_block, e_block, start)
+            # Eveのビットを反転
+            eve_key_list[error_idx] = "1" if eve_key_list[error_idx] == "0" else "0"
+            corrected_count += 1
+
+    print(f"\n--- (イブの)エラー訂正報告 ---")
+    print(f"公開情報により、{corrected_count} 個のエラーを修正しました。")
+    return "".join(eve_key_list)
 
 
 def assign_labels(n_batch, decoy_ratio=0.1):
@@ -709,12 +754,21 @@ def main():
             bob_second_key = ""  # 空文字で初期化
             print("⚠️ 警告: ボブの鍵がありません。")
 
+        if eve_present:
+            if len(bob_key) > 0:
+                eve_second_key = reconcile_errors_e_binary(
+                    alice_key, bob_key, eve_key, block_size=10
+                )
+            else:
+                eve_second_key = ""  # 空文字で初期化
+                print("⚠️ 警告: イブの鍵がありません。")
+
         alice_final_key = privacy_amplification(alice_second_key)
         bob_final_key = privacy_amplification(bob_second_key)
 
         eve_final_key = ""
-        if eve_present and eve_key:
-            eve_final_key = privacy_amplification(eve_key.replace("F", "0"))
+        if eve_present and eve_second_key:
+            eve_final_key = privacy_amplification(eve_second_key.replace("F", "0"))
 
         # 最終鍵の生成
         for _ in tqdm(range(100), desc="最終鍵の生成中…"):
