@@ -1,3 +1,4 @@
+import sys
 from qiskit.circuit import Parameter, QuantumCircuit, ClassicalRegister, QuantumRegister
 import tkinter as tk
 from tkinter import ttk
@@ -441,6 +442,11 @@ def analyze_qber(
     print(f"デコイビット受信率: {yield_d*100:.2f} %")
 
     # PNS攻撃の検知（暫定版）
+    if yield_s == 0:
+        print(
+            "\n❌ 失敗：鍵を生成するために必要なビットが残っていません。通信を終了します。"
+        )
+        sys.exit()
     if yield_d / yield_s > 1.2:
         eave_suspected = True
 
@@ -486,7 +492,7 @@ def reconcile_errors_binary(alice_key, bob_key, block_size=10):
     corrected_count = 0
 
     # ブロックごとに処理
-    for batch_idx, start in enumerate(range(0, len(alice_key), block_size)):
+    for start in enumerate(range(0, len(alice_key), block_size)):
         end = min(start + block_size, len(alice_key))
 
         a_block = alice_key[start:end]
