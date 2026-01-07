@@ -707,7 +707,7 @@ def main():
             bob_second_key = reconcile_errors_binary(alice_key, bob_key, block_size=10)
         else:
             bob_second_key = ""  # 空文字で初期化
-            print("⚠️ 警告: ボブの鍵が空です。")
+            print("⚠️ 警告: ボブの鍵がありません。")
 
         alice_final_key = privacy_amplification(alice_second_key)
         bob_final_key = privacy_amplification(bob_second_key)
@@ -720,26 +720,50 @@ def main():
         for _ in tqdm(range(100), desc="最終鍵の生成中…"):
             time.sleep(0.01)
 
+        eve_final_key = ""
+        if eve_present and eve_key:
+            eve_final_key = privacy_amplification(eve_key.replace("F", "0"))
+
+        for _ in tqdm(range(100), desc="最終鍵の生成中…"):
+            time.sleep(0.01)
+
+        # --- BB84 レポート ---
         print("\n" + "=" * 50)
-        print("BB84 最終レポート")
+        print("BB84 最終レポート（Quantum Fusion Core）")
         print("=" * 50)
         print(
-            f"距離 {distance_ab_km}km (Eveの位置: {distance_ae_km if eve_present else 'なし'}km)"
+            f"距離 {distance_ab_km}km (Eve位置: {distance_ae_km if eve_present else 'なし'}km)"
         )
         print(f"盗聴者の有無: {'あり' if eve_present else 'なし'}")
-        print(f"アリスの最終鍵: {alice_final_key[:50]}...")
-        print(f"ボブの最終鍵:   {bob_final_key[:50]}...")
+        print(f"アリスの最終鍵: {alice_final_key[:40]}...")
+        print(f"ボブの最終鍵:   {bob_final_key[:40]}...")
         print(f"QBER (量子ビット誤り率): {qber * 100:.2f} %")
         if eave_suspected:
             print("⚠️ 警告: 盗聴の可能性があります。")
 
-        # メッセージ送信の応用デモ
+        # --- イブのレポート ---
+        if eve_present:
+            print(f"\n" + "=" * 50)
+            print("盗聴者イブのレポート")
+            print("=" * 50)
+            print(f" イブの位置: {distance_ae_km} km")
+            print(
+                f" イブの光子捕捉成功数: {len(all_eve_bits.replace('F', ''))} / {n_bits}"
+            )
+            print(f" イブが手に入れた鍵の断片: {eve_final_key[:50]}...")
+            if not (alice_final_key == bob_final_key and len(alice_final_key) > 0):
+                print(
+                    f" 結論: 鍵共有に失敗したため、イブは暗号化されたメッセージを得る機会すらありませんでした。"
+                )
+            print("=" * 50)
+
+        # --- 鍵共有成功時 ---
         if alice_final_key == bob_final_key and len(alice_final_key) > 0:
             print("\n✅ 成功：秘密鍵が共有されました。暗号通信を開始します。")
             secret_message_text = information_input()
             secret_bits = encode_message(secret_message_text, to_bit_table)
 
-            # 暗号化 (XOR)
+            # 暗号化
             encrypted_bits = "".join(
                 [
                     str(int(secret_bits[i]) ^ int(alice_final_key[i % 256]))
@@ -756,76 +780,26 @@ def main():
                 ]
             )
             print(
-                f"ボブが復元した内容: {decode_message(decrypted_bob_bits, to_str_table)}"
+                f"ボブが復号した内容: {decode_message(decrypted_bob_bits, to_str_table)}"
             )
 
-            # --- イブ（盗聴者）の視点のレポート ---
-            if eve_present:
-                print(f"\n" + "=" * 50)
-                print("盗聴者イブのレポート")
-                print("=" * 50)
-                print(f" イブの位置: {distance_ae_km} km")
-                eve_capture_count = all_eve_bits.replace("F", "")
-                print(
-                    f" イブが光子の捕捉に成功した数: {len(eve_capture_count)} / {n_bits}"
-                )
-
-                # イブの解読
-                if alice_final_key == bob_final_key and len(alice_final_key) > 0:
-                    # 鍵が共有できているので、メッセージ解読を試みる
-                    if eve_final_key:
-                        # ここまで成功している場合、passします
-                        pass
-                else:
-
-                    print(
-                        " 結論: 鍵の共有に失敗したため、イブは暗号化されたメッセージまで到達できませんでした。"
-                    )
-                    print(
-                        "       (QBERが非常に高いため、システムが自動的に通信を遮断しました)"
-                    )
-                print("=" * 50)
-
-        if alice_final_key == bob_final_key and len(alice_final_key) > 0:
-            print("\n✅ 成功：秘密鍵が共有されました。暗号通信を開始します。")
-            secret_message_text = information_input()
-            secret_bits = encode_message(secret_message_text, to_bit_table)
-
-            # 暗号化 (XOR)
-            encrypted_bits = "".join(
-                [
-                    str(int(secret_bits[i]) ^ int(alice_final_key[i % 256]))
-                    for i in range(len(secret_bits))
-                ]
-            )
-            print(f"送信中の暗号文: {encrypted_bits[:50]}...")
-
-            # ボブが解読
-            dec_bits_bob = "".join(
-                [
-                    str(int(encrypted_bits[i]) ^ int(bob_final_key[i % 256]))
-                    for i in range(len(encrypted_bits))
-                ]
-            )
-            print(f"ボブが復元した内容: {decode_message(dec_bits_bob, to_str_table)}")
-
-            # 成功時の解読失敗
+            # イブによる解読
             if eve_present and eve_final_key:
-                print(f"\n >>> イブによる解読試行:")
-                eve_decrypted_bits = "".join(
+                print(f"\n >>> イブによる解読")
+                decrypted_eve_bits = "".join(
                     [
                         str(int(encrypted_bits[i]) ^ int(eve_final_key[i % 256]))
                         for i in range(len(encrypted_bits))
                     ]
                 )
                 print(
-                    f" イブが見た内容: {decode_message(eve_decrypted_bits, to_str_table)}"
+                    f"     イブが見た内容: {decode_message(decrypted_eve_bits, to_str_table)}"
                 )
                 print(
-                    f" 結果: 解読に失敗しました。プライバシー増幅により1ビットの差が致命的な差となります。"
+                    f"     結果: ❌ 失敗 1ビットの差でも大きな違いが生まれ、メッセージが解読できません。"
                 )
         else:
-            print("\n❌ 失敗：安全な鍵が共有できませんでした。")
+            print("\n❌ 失敗：安全な鍵が共有できませんでした。通信を終了します。")
 
 
 if __name__ == "__main__":
