@@ -102,7 +102,7 @@ def verification():
     bob_another_count = sum(
         count
         for key, count in counts.items()
-        if not key.startswith("0") and key.startswith("1")
+        if not key.startswith("0") and not key.startswith("1")
     )
 
     print(f"\nシミュレーション結果:")
