@@ -492,7 +492,7 @@ def reconcile_errors_binary(alice_key, bob_key, block_size=10):
     corrected_count = 0
 
     # ブロックごとに処理
-    for start in enumerate(range(0, len(alice_key), block_size)):
+    for start in range(0, len(alice_key), block_size):
         end = min(start + block_size, len(alice_key))
 
         a_block = alice_key[start:end]
@@ -556,38 +556,37 @@ def reconcile_errors_e_binary(alice_key, bob_key, eve_key, block_size=10):
     return "".join(eve_key_list)
 
 
-def distance_km(eve_present):
+def get_distance_input(eve_present, distance_ab_km=None):
     """この関数では通信距離をkm単位で入力します。
     Args:
         eve_present (bool): イブが存在するかどうか
-    Returns:
-        distance_ab_km, distance_ae_km (float): 通信距離（km）
-    """
-    if eve_present == False:
-        try:
-            distance_ab_km = float(
-                input("AliceとBobの距離をkm単位で入力してください: ")
-            )
-            if distance_ab_km <= 0:
-                print("距離は正の数でなければなりません。再度入力してください。")
-                return distance_km(eve_present)
-            return distance_ab_km
-        except ValueError:
-            print("無効な入力です。再度入力してください。")
-            return distance_km(eve_present)
+        distance_ab_km (float, optional): AliceとBobの距離（km）
 
-    if eve_present == True:
-        try:
-            distance_ae_km = float(
-                input(f"イブの待機位置を入力してください (0 ~ {distance_ab_km}km): ")
-            )
-            if distance_ae_km <= 0:
-                print("距離は正の数でなければなりません。再度入力してください。")
-                return distance_km(eve_present)
-            return distance_ae_km
-        except ValueError:
-            print("無効な入力です。再度入力してください。")
-            return distance_km(eve_present)
+    Returns:
+        float: 通信距離（km）
+    """
+    while True:
+        if not eve_present:
+            val = input("AliceとBobの距離をkm単位で入力してください: ")
+            try:
+                dist = float(val)
+                if dist >= 0:
+                    return dist
+                print("距離は0以上にしてください。")
+            except ValueError:
+                print("有効な数値を入力してください。")
+        else:
+            if distance_ab_km is None:
+                raise ValueError("イブの位置入力にはdistance_ab_kmが必要です")
+
+            val = input(f"イブの待機位置を入力してください (0 ~ {distance_ab_km}km): ")
+            try:
+                dist = float(val)
+                if 0 <= dist <= distance_ab_km:
+                    return dist
+                print(f"位置は0から{distance_ab_km}の間で指定してください。")
+            except ValueError:
+                print("有効な数値を入力してください。")
 
 
 def assign_labels(n_batch, decoy_ratio=0.1):
@@ -655,7 +654,7 @@ def main():
         eve_present = False
         # 条件設定
         try:
-            distance_ab_km = distance_km(eve_present)
+            distance_ab_km = get_distance_input(eve_present)
         except ValueError:
             print("無効な入力です。デフォルト値0kmを使用します。")
             distance_ab_km = 0.0
@@ -665,7 +664,7 @@ def main():
         eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
 
         if eve_present:
-            distance_ae_km = distance_km(eve_present)
+            distance_ae_km = get_distance_input(eve_present, distance_ab_km)
             if distance_ae_km > distance_ab_km:
                 distance_ae_km = distance_ab_km
 
@@ -889,10 +888,10 @@ def main():
                     ]
                 )
                 print(
-                    f"     イブが見た内容: {decode_message(decrypted_eve_bits, to_str_table)}"
+                    f"イブが見た内容: {decode_message(decrypted_eve_bits, to_str_table)}"
                 )
                 print(
-                    f"     結果: ❌ 失敗 1ビットの差でも大きな違いが生まれ、メッセージが解読できません。"
+                    f"結果: ❌ 失敗 1ビットの差でも大きな違いが生まれ、メッセージが解読できません。"
                 )
         else:
             print("\n❌ 失敗：安全な鍵が共有できませんでした。通信を終了します。")

@@ -17,7 +17,7 @@ def input_theta():
         return input_theta()
 
 
-def sensing():
+def phase_probability_experiment():
     theta_float = input_theta()
     qc = QuantumCircuit(1, 1)
     qc.h(0)  # H（重ね合わせ）
@@ -41,7 +41,49 @@ def sensing():
     for state, count in counts.items():
         probability = count / total_shots
         print(f"状態 |{state}⟩: {count}回 ({probability*100:.2f}%)")
-    return qc, counts
 
 
-sensing()
+def iterative_phase_estimation(num_bits=4):
+    """
+    この関数では、反復位相推定 (IPE) を行います。
+    精度を徐々に高めていき、位相を確定させていきます。
+    """
+    print(f"\n--- IPE ---")
+
+    estimated_phase = input_theta()
+    for i in reversed(range(num_bits)):
+        print(f"\n {i+1} 回目の測定:")
+        scaling = 2**i
+
+        theta_float = input_theta()
+        qc = QuantumCircuit(1, 1)
+        qc.h(0)  # H（重ね合わせ）
+        qc.rz(theta_float * scaling, 0)  # RZ
+        qc.h(0)  # H（干渉）
+        qc.measure(0, 0)  # 測定
+        print("回路:")
+        print(qc.draw("text"))
+
+        sim = AerSimulator()
+        qc_compiled = transpile(qc, sim)
+        result = sim.run(qc_compiled, shots=1024).result()
+        counts = result.get_counts()
+
+        print("\n測定結果:")
+        print(counts)
+
+        # 確率
+        total_shots = sum(counts.values())
+        for state, count in counts.items():
+            probability = count / total_shots
+            print(f"状態 |{state}⟩: {count}回 ({probability*100:.2f}%)")
+        return estimated_phase
+
+
+def main():
+    phase_probability_experiment()
+    iterative_phase_estimation(num_bits=4)
+
+
+if __name__ == "__main__":
+    main()
