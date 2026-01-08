@@ -556,6 +556,40 @@ def reconcile_errors_e_binary(alice_key, bob_key, eve_key, block_size=10):
     return "".join(eve_key_list)
 
 
+def distance_km(eve_present):
+    """この関数では通信距離をkm単位で入力します。
+    Args:
+        eve_present (bool): イブが存在するかどうか
+    Returns:
+        distance_ab_km, distance_ae_km (float): 通信距離（km）
+    """
+    if eve_present == False:
+        try:
+            distance_ab_km = float(
+                input("AliceとBobの距離をkm単位で入力してください: ")
+            )
+            if distance_ab_km <= 0:
+                print("距離は正の数でなければなりません。再度入力してください。")
+                return distance_km(eve_present)
+            return distance_ab_km
+        except ValueError:
+            print("無効な入力です。再度入力してください。")
+            return distance_km(eve_present)
+
+    if eve_present == True:
+        try:
+            distance_ae_km = float(
+                input(f"イブの待機位置を入力してください (0 ~ {distance_ab_km}km): ")
+            )
+            if distance_ae_km <= 0:
+                print("距離は正の数でなければなりません。再度入力してください。")
+                return distance_km(eve_present)
+            return distance_ae_km
+        except ValueError:
+            print("無効な入力です。再度入力してください。")
+            return distance_km(eve_present)
+
+
 def assign_labels(n_batch, decoy_ratio=0.1):
     """この関数ではSignal、Decoyいずれかのラベルを割り当てます。
 
@@ -618,18 +652,20 @@ def main():
         n_bits = len(bit_sequence)
         print(f"送信ビット列: {bit_sequence} (長さ: {n_bits})")
 
+        eve_present = False
         # 条件設定
-        distance_ab_km = float(
-            input("Alice-Bob間の通信距離をkm単位で入力してください。: ")
-        )
+        try:
+            distance_ab_km = distance_km(eve_present)
+        except ValueError:
+            print("無効な入力です。デフォルト値0kmを使用します。")
+            distance_ab_km = 0.0
+
         distance_ae_km = 0.0
 
         eve_present = input("イブ（盗聴者）を介入させますか？ (y/n): ").lower() == "y"
 
         if eve_present:
-            distance_ae_km = float(
-                input(f"イブの待機位置を入力してください (0 ~ {distance_ab_km}km): ")
-            )
+            distance_ae_km = distance_km(eve_present)
             if distance_ae_km > distance_ab_km:
                 distance_ae_km = distance_ab_km
 
