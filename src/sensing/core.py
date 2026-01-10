@@ -125,15 +125,31 @@ def main():
     current_correction = iterative_phase_estimation(true_base_phase, num_bits=6)
 
     steps, true_phases, corrections = [], [], []
+    p0_history = []
     drift_rate = 0.02
     plt.ion()
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.set_title("Quantum Sensing Phase Tracker (Real-time Feedback)")
-    ax.set_xlabel("Time Step")
-    ax.set_ylabel("Phase (rad)")
-    (line_true,) = ax.plot([], [], "b-", label="Env (True)", alpha=0.6)
-    (line_corr,) = ax.plot([], [], "r-o", label="Quantum Lock", markersize=4)
-    ax.legend()
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+
+    ax1.set_title("Quantum Sensing: Infrastructure Monitor")
+    ax1.set_ylabel("Vibration Amplitude (mm)")  # rad -> mm
+
+    (line_true,) = ax1.plot([], [], "b-", label="Ground Drift (Actual mm)", alpha=0.6)
+    (line_corr,) = ax1.plot(
+        [], [], "r-o", label="Quantum Sensor Lock (mm)", markersize=4
+    )
+    conv = 10.0
+    true_phases_mm = [p * conv for p in true_phases]
+    corrections_mm = [c * conv for c in corrections]
+    line_true.set_data(steps, true_phases_mm)
+    line_corr.set_data(steps, corrections_mm)
+    ax1.legend()
+
+    ax2.set_title("Sensing Stability P(0)")
+    ax2.set_ylabel("Probability")
+    ax2.set_ylim(0, 1)
+    ax2.axhline(0.5, color="gray", linestyle="--")  # 0.5に基準を定める
+    (line_p0,) = ax2.plot([], [], "g-", label="P(0)")
+    ax2.legend()
     print("\nMonitor Active. Close window to exit.")
     try:
         for t in range(50):
@@ -144,11 +160,16 @@ def main():
             steps.append(t)
             true_phases.append(actual_field)
             corrections.append(current_correction)
-            # 更新
+            p0_history.append(p0)
             line_true.set_data(steps, true_phases)
             line_corr.set_data(steps, corrections)
-            ax.relim()
-            ax.autoscale_view()
+            ax1.relim()
+            ax1.autoscale_view()
+
+            line_p0.set_data(steps, p0_history)
+            ax2.relim()
+            ax2.autoscale_view()
+
             plt.draw()
             plt.pause(0.1)
 

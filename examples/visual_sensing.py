@@ -2,15 +2,14 @@ import sys
 import os
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
-
-from src.sensing.core import feedback_control_step, estimate_phase_ipe
+from src.sensing.core import feedback_control_step, iterative_phase_estimation
 
 steps = []
 true_phases = []
 corrections = []
 
 true_base_phase = 1.23
-current_correction = estimate_phase_ipe(true_base_phase, num_bits=6)
+current_correction = iterative_phase_estimation(true_base_phase, num_bits=6)
 drift_rate = 0.02
 
 for t in range(50):
