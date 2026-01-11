@@ -1,3 +1,34 @@
+# ==================== 定数定義 ====================
+
+# シミュレーション設定
+DEFAULT_SHOTS_EXPERIMENT = 1024  # 位相実験の測定回数
+DEFAULT_SHOTS_FEEDBACK = 100  # フィードバック制御の測定回数
+IPE_SHOTS = 1  # IPEは決定論的なので1回
+
+# アルゴリズムパラメータ
+IPE_DEFAULT_BITS = 6  # IPEの推定精度（ビット数）
+FEEDBACK_GAIN = 0.5  # P制御ゲイン（Kp）
+
+# 物理パラメータ
+TRUE_BASE_PHASE = 1.23  # 初期磁場位相 [rad]
+PHASE_DRIFT_RATE = 0.02  # 位相ドリフト速度 [rad/step]
+
+# モニタリング設定
+MONITORING_STEPS = 50  # モニタリングステップ数
+ANIMATION_INTERVAL = 0.1  # グラフ更新間隔 [秒]
+
+# GUI設定
+GUI_WINDOW_WIDTH = 300  # 選択ウィンドウの幅 [px]
+GUI_WINDOW_HEIGHT = 150  # 選択ウィンドウの高さ [px]
+
+# 可視化設定
+FIGURE_WIDTH = 10  # グラフの幅 [インチ]
+FIGURE_HEIGHT = 8  # グラフの高さ [インチ]
+LINE_ALPHA = 0.6  # 線の透明度
+MARKER_SIZE = 4  # マーカーサイズ
+
+# ==================== ここまで定数 ====================
+
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 import numpy as np
@@ -7,7 +38,7 @@ import tkinter as tk
 from tkinter import ttk
 
 
-def select():
+def select() -> str:
     """この関数では、GUIを用いてユーザーにテーマを選択させます。
 
     Returns:
@@ -38,7 +69,7 @@ def select():
     return selected_value["val"]
 
 
-def input_theta(prompt="位相をラジアンで入力してください(-π~π): "):
+def input_theta(prompt: str = "位相をラジアンで入力してください(-π~π): ") -> float:
     """この関数では、ユーザーに位相θをラジアンで入力させます。
 
     Args:
@@ -49,14 +80,14 @@ def input_theta(prompt="位相をラジアンで入力してください(-π~π)
     """
     theta = input(prompt)
     try:
-        theta_sympify = sp.sympify(theta)
-        return float(sp.N(theta_sympify))
-    except:
+        theta_symbolic = sp.sympify(theta)
+        return float(sp.N(theta_symbolic))
+    except (ValueError, SyntaxError, TypeError):
         print("無効な入力です。再度入力してください。")
         return input_theta(prompt)
 
 
-def phase_probability_experiment():
+def phase_probability_experiment() -> None:
     """位相θに応じた測定確率の変化を観察します.
 
     H-RZ(θ)-H回路を用いて、位相回転角θと測定確率の関係を実験的に確認します.
@@ -96,9 +127,9 @@ def phase_probability_experiment():
 
     theta_float = input_theta()
     qc = QuantumCircuit(1, 1)
-    qc.h(0)  # H（重ね合わせ）
-    qc.rz(theta_float, 0)  # RZ
-    qc.h(0)  # H（干渉）
+    qc.h(0)  # H(重ね合わせ)
+    qc.rz(theta_float, 0)  # RZ(位相回転)
+    qc.h(0)  # H(干渉)
     qc.measure(0, 0)  # 測定
     print("回路:")
     print(qc.draw("text"))
@@ -112,18 +143,17 @@ def phase_probability_experiment():
     print("\n測定結果:")
     print(counts)
 
-    # 確率
     total_shots = sum(counts.values())
     for state, count in counts.items():
         probability = count / total_shots
         print(f"状態 |{state}⟩: {count}回 ({probability*100:.2f}%)")
 
 
-def iterative_phase_estimation(true_theta, num_bits=6):
-    """反復位相推定(IPE)アルゴリズムを用いて位相を推定します。
+def iterative_phase_estimation(true_theta: float, num_bits: int = 6) -> float:
+    """反復位相推定(IPE)アルゴリズムを用いて位相を推定します.
 
-    量子位相推定の省リソース版で、1量子ビットのみを使用して
-    位相を最下位ビットから順に決定していきます。
+    量子位相推定の省リソース版.
+    1量子ビットのみを使用して位相を最下位ビットから順に決定していきます.
 
     Args:
         true_theta (float): 推定対象の真の位相[rad] (0 ~ 2π)
@@ -155,14 +185,14 @@ def iterative_phase_estimation(true_theta, num_bits=6):
         qc = QuantumCircuit(1, 1)
         qc.h(0)  # H（重ね合わせ）
         qc.rz(true_theta * scaling, 0)  # RZ（位相回転）
-        qc.rz(-estimated_phase * scaling, 0)  # 既知位相の打ち消し
+        qc.rz(-estimated_phase * scaling, 0)  # RZ (既知位相の打ち消し)
         qc.h(0)  # H（干渉）
         qc.measure(0, 0)  # 測定
 
         # --- 実行 ---
         sim = AerSimulator()
-        result = sim.run(transpile(qc, sim), shots=1).result()
-        measured_bit = int(list(result.get_counts().keys())[0])
+        simulation_result = sim.run(transpile(qc, sim), shots=1).result()
+        measured_bit = int(list(simulation_result.get_counts().keys())[0])
 
         # 位相の更新
         if measured_bit == 1:
@@ -237,10 +267,11 @@ def feedback_control_step(actual_field, current_correction, shots=100, gain=0.5)
 
 
 def main():
-    if select() == "位相による確率変化の実験":
+    selected_theme = select()
+    if selected_theme == "位相による確率変化の実験":
         phase_probability_experiment()
         return
-    if select() == "量子センシング":
+    if selected_theme == "量子センシング":
         true_base_phase = 1.23
         print(f"Monitoring System Starting... Base Phase: {true_base_phase}")
 
@@ -252,20 +283,15 @@ def main():
         plt.ion()
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
-        ax1.set_title("Quantum Sensing: Infrastructure Monitor")
-        ax1.set_ylabel("Vibration Amplitude (mm)")  # rad -> mm
+        ax1.set_title(
+            "Feedback-based Quantum Phase Sensing using Single-Qubit Interference"
+        )
+        ax1.set_ylabel("Phase (rad)")
 
-        (line_true,) = ax1.plot(
-            [], [], "b-", label="Ground Drift (Actual mm)", alpha=0.6
-        )
+        (line_true,) = ax1.plot([], [], "b-", label="Phase Drift (rad)", alpha=0.6)
         (line_corr,) = ax1.plot(
-            [], [], "r-o", label="Quantum Sensor Lock (mm)", markersize=4
+            [], [], "r-o", label="Estimated Phase Correction (rad)", markersize=4
         )
-        conv = 10.0
-        true_phases_mm = [p * conv for p in true_phases]
-        corrections_mm = [c * conv for c in corrections]
-        line_true.set_data(steps, true_phases_mm)
-        line_corr.set_data(steps, corrections_mm)
         ax1.legend()
 
         ax2.set_title("Sensing Stability P(0)")
@@ -276,12 +302,12 @@ def main():
         ax2.legend()
         print("\nMonitor Active. Close window to exit.")
         try:
-            for t in range(50):
-                actual_field = true_base_phase + (t * drift_rate)
+            for step in range(50):
+                actual_field = true_base_phase + (step * drift_rate)
                 current_correction, p0 = feedback_control_step(
                     actual_field, current_correction, shots=100
                 )
-                steps.append(t)
+                steps.append(step)
                 true_phases.append(actual_field)
                 corrections.append(current_correction)
                 p0_history.append(p0)
