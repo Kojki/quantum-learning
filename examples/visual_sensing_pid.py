@@ -1,6 +1,5 @@
 import sys
 import os
-import numpy as np
 import matplotlib.pyplot as plt
 from qiskit import transpile
 from qiskit_aer import AerSimulator
@@ -14,9 +13,8 @@ def main():
     # 1. 初期設定
     true_base_phase = 1.23  # 監視対象の初期値
     drift_rate = 0.02  # 外部環境の変化
-    conv = 10.0  # 変換係数(rad -> mm)
 
-    print(f"--- QK-Pulse: Advanced Sensing (PID Mode) ---")
+    print(f"--- Advanced Sensing (PID Mode) ---")
     print(f"基準位相: {true_base_phase} rad")
 
     current_correction = iterative_phase_estimation(true_base_phase, num_bits=6)
@@ -31,10 +29,12 @@ def main():
     plt.ion()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
 
-    ax1.set_title("Quantum Phase Tracker (PID Control)")
-    ax1.set_ylabel("Vibration Amplitude (mm)")
-    (line_true,) = ax1.plot([], [], "b-", label="Env (Actual)", alpha=0.4)
-    (line_corr,) = ax1.plot([], [], "r-", label="Quantum Lock (PID)", linewidth=2)
+    ax1.set_title("Quantum Phase Real-time Tracker (PID Control)")
+    ax1.set_ylabel("Phase (rad)")
+    (line_true,) = ax1.plot([], [], "b-", label="Environment Phase (rad)", alpha=0.4)
+    (line_corr,) = ax1.plot(
+        [], [], "r-", label="Quantum Sensor Output (rad)", linewidth=2
+    )
     ax1.legend()
 
     ax2.set_title("Sensing Stability P(0)")
@@ -43,9 +43,7 @@ def main():
     ax2.axhline(0.5, color="gray", linestyle="--")
     (line_p0,) = ax2.plot([], [], "g-", label="P(0)")
     ax2.legend()
-    print(
-        "\n[PID Monitoring Active] 積分項(I)が定常偏差を消し去る様子を観察してください。"
-    )
+    print("\nPID制御によるモニタリングを開始しました。ウィンドウを閉じると終了します。")
     try:
         for t in range(100):
             actual_field = true_base_phase + (t * drift_rate)
@@ -62,8 +60,8 @@ def main():
 
             # データの保存
             steps.append(t)
-            true_phases.append(actual_field * conv)
-            corrections.append(current_correction * conv)
+            true_phases.append(actual_field)
+            corrections.append(current_correction)
             p0_history.append(p0)
 
             # グラフ更新

@@ -21,7 +21,7 @@ def main():
     (line_true,) = ax.plot([], [], "b-", label="Environment Phase (rad)", alpha=0.5)
     (line_corr,) = ax.plot([], [], "r-", label="Quantum Sensor Output (rad)")
     ax.legend()
-    ax.set_title("Quantum Phase Tracking with Feedback Control")
+    ax.set_title("Quantum Phase Real-time Tracker")
     ax.set_xlabel("Step")
     ax.set_ylabel("Phase (rad)")
     for t in range(100):

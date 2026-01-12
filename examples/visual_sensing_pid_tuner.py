@@ -2,11 +2,8 @@ import sys
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider  # つまみ用の部品
-from qiskit import transpile
-from qiskit_aer import AerSimulator
+from matplotlib.widgets import Slider
 
-# 親フォルダをパスに追加
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.sensing.core import iterative_phase_estimation, feedback_control_step
 from src.sensing.control import PIDController
@@ -27,13 +24,15 @@ def main():  # 初期設定
 
     # グラフの構築
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-    plt.subplots_adjust(bottom=0.25)  # 下側にスライダー用のスペースを確保
+    plt.subplots_adjust(bottom=0.25)
 
     steps, env_actual, sensor_lock, p0_history = [], [], [], []
 
-    (line_true,) = ax1.plot([], [], "b-", label="Env (Actual)", alpha=0.3)
-    (line_corr,) = ax1.plot([], [], "r-", label="Quantum Lock (PID)", linewidth=2)
-    ax1.set_title("Real-time PID Parameter Tuner")
+    (line_true,) = ax1.plot([], [], "b-", label="Environment Phase (rad)", alpha=0.3)
+    (line_corr,) = ax1.plot(
+        [], [], "r-", label="Quantum Sensor Output (rad)", linewidth=2
+    )
+    ax1.set_title("Quantum Phase Real-time Tracker (PID Control)")
     ax1.set_ylabel(f"Value ({PHYSICAL_UNIT})")
     ax1.legend(loc="upper left")
 
@@ -42,7 +41,8 @@ def main():  # 初期設定
     ax2.set_ylim(0, 1)
     ax2.set_ylabel("Probability")
     ax2.legend(loc="upper left")
-    # --- スライダー（つまみ）の設置 ---
+
+    # --- スライダーの設置 ---
     ax_kp = plt.axes([0.15, 0.12, 0.65, 0.03])
     ax_ki = plt.axes([0.15, 0.08, 0.65, 0.03])
     ax_kd = plt.axes([0.15, 0.04, 0.65, 0.03])
@@ -59,7 +59,7 @@ def main():  # 初期設定
     s_ki.on_changed(update_params)
     s_kd.on_changed(update_params)
     t = 0
-    print("\n[Tuner Active] スライダーを動かしてPIDパラメータを調整してください。")
+    print("\nスライダーを動かしてPIDパラメータを調整してください。")
     try:
         while plt.fignum_exists(fig.number):
             # 外部環境の変化
