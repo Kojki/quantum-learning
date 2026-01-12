@@ -273,7 +273,9 @@ def main():
         return
     if selected_theme == "量子センシング":
         true_base_phase = 1.23
-        print(f"Monitoring System Starting... Base Phase: {true_base_phase}")
+        print(
+            f"モニタリングシステムを起動しています… 基準の位相: {true_base_phase} rad"
+        )
 
         current_correction = iterative_phase_estimation(true_base_phase, num_bits=6)
 
@@ -300,7 +302,7 @@ def main():
         ax2.axhline(0.5, color="gray", linestyle="--")  # 0.5に基準を定める
         (line_p0,) = ax2.plot([], [], "g-", label="P(0)")
         ax2.legend()
-        print("\nMonitor Active. Close window to exit.")
+        print("\nモニタリングを開始しました。ウィンドウを閉じると終了します。")
         try:
             for step in range(50):
                 actual_field = true_base_phase + (step * drift_rate)
@@ -324,7 +326,7 @@ def main():
                 plt.pause(0.1)
 
         except KeyboardInterrupt:
-            print("\nMonitoring stopped.")
+            print("\nモニタリングを停止しました。")
         plt.ioff()
         plt.show()
 
