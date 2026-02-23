@@ -28,7 +28,7 @@
 
 ## 3. 使用技術・ライブラリ
 - **Language**: Python 3.10+
-- **Framework**: [Qiskit](https://qiskit.org/) (IBM Quantum)
+- **Framework**: [Qiskit](https://qiskit.org/) (IBM Quantum), [Qulacs](https://docs.qulacs.org/) (QunaSys)
 - **Simulator**: Qiskit Aer
 - **Visualization**: Matplotlib
 - **Math**: NumPy, SymPy
