@@ -159,7 +159,7 @@ class DI_QKD_Simulator:
         )
         print("  S ≒ 2.82(2√2) : 量子限界（デバイスは完全に安全、本物のもつれが存在）")
 
-        print("\n👉結論:")
+        print("\n結論:")
         if abs(chsh_score) > 2.0:
             print("  CHSH不等式が破れました")
             print(

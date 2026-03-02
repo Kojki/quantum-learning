@@ -5,7 +5,7 @@
 
 # Integrated Quantum Simulation Portfolio
 [![Qiskit](https://img.shields.io/badge/Framework-Qiskit-blueviolet)](https://qiskit.org/)
-[![Qulacs](https://img.shields.io/badge/Simulator-Qulacs-blue)](http://www.qulacs.org/)
+[![Qulacs](https://img.shields.io/badge/Framework-Qulacs-blue)](http://www.qulacs.org/)
 [![Status](https://img.shields.io/badge/Project--Status-In--Progress-yellow)](#)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -28,7 +28,7 @@
   - **`optimization/`**: 最適化問題を解くためのエンジン（QAOA, AQC, Grover）を実装。
   - **`communication/`**: 暗号通信（BB84）や状態転送（Teleportation）のプロトコル群。
   - **`ml/`**: 量子×機械学習（VQC, Kernel）を実装。
-- **`docs/`**: 📚 **学習用**
+- **`docs/`**: **学習用**
   - 理論と実装を繋ぐための詳しい解説ドキュメント。
 
 ---
@@ -58,24 +58,24 @@
 
 ### 1. 量子センシング (Sensing)
 量子ビットを高感度センサとして用いる技術。
-- [x] **01_Physics_of_Phase**: 位相が確率に変わる干渉の仕組み。
-- [x] **02_Scaling_Precision**: 反復推定(IPE)で精度を指数関数的に高める方法。
-- [x] **03_Feedback_Stabilization**: ドリフト（外部ノイズ）をリアルタイムで補正する。
+- **01_Physics_of_Phase**: 位相が確率に変わる干渉の仕組み。
+- **02_Scaling_Precision**: 反復推定(IPE)で精度を指数関数的に高める方法。
+- **03_Feedback_Stabilization**: ドリフト（外部ノイズ）をリアルタイムで補正する。
 
 ### 2. 量子最適化 (Optimization)
 複雑なパズルの最適解を高速で導き出す技術。
-- [x] **01_Mapping_to_QUBO**: 現実の問題をハミルトニアン（数式）に変換。
-- [x] **02_Adiabatic_Optimization**: ゆっくり時間をかけて正解に導く断熱計算。
-- [x] **03_QAOA_Optimization_Engine**: 量子と古典のハイブリッドによる高速化。
+- **01_Mapping_to_QUBO**: 現実の問題をハミルトニアン（数式）に変換。
+- **02_Adiabatic_Optimization**: ゆっくり時間をかけて正解に導く断熱計算。
+- **03_QAOA_Optimization_Engine**: 量子と古典のハイブリッドによる高速化。
 
 ### 3. 量子通信 (Communication)
 理論的には盗聴が不可能な通信。
-- [x] **01_BB84_Security_Principle**: なぜ盗聴を確実に検知できるのか？
-- [x] **02_Noise_Limit_Analysis**: どの程度のノイズまでなら安全が守れるか。
+- **01_BB84_Security_Principle**: なぜ盗聴を確実に検知できるのか？
+- **02_Noise_Limit_Analysis**: どの程度のノイズまでなら安全が守れるか。
 
 ---
 
-## 🛠 使用技術
+## 使用技術
 - **Language**: Python 3.10+
 - **Quantum Framework**: [Qiskit](https://qiskit.org/), [Qulacs](http://www.qulacs.org/)
 - **Simulator**: AerSimulator (ノイズモデル対応)
