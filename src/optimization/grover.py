@@ -5,15 +5,15 @@ from qiskit_aer import AerSimulator
 
 
 class GroverSearch:
-    """Groverのアルゴリズムを用いた量子探索クラス.
+    """Groverのアルゴリズムを用いた量子探索クラス。
 
     未整列のデータの中から正解の状態（ビット文字列）を O(√N) の計算量で見つけ出します。
 
     Theory:
         1. 初期化: 全状態の等確率重ね合わせ |s> = H^n |0>
         2. 反復処理 (Grover Iteration) を約 (π/4)√N 回繰り返す:
-           - オラクル (Oracle): 正解の状態の符号を反転させる (|x> -> -|x>)
-           - ディフューザー (Diffuser): 平均値を中心とした反転を行い、正解の振幅を増幅させる
+           - Oracle: 正解の状態の符号を反転させる (|x> -> -|x>)
+           - Diffuser: 平均値を中心とした反転を行い、正解の振幅を増幅させる
         3. 測定: 確率が最大化した正解の状態を得る
 
     Attributes:

@@ -90,7 +90,7 @@
 git clone https://github.com/Kojki/quantum-learning.git
 cd quantum-learning
 
-# 依存ライブラリのインストール
+# ライブラリのインストール
 pip install qiskit qiskit-aer matplotlib numpy scipy scikit-learn seaborn sympy
 ```
 
