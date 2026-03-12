@@ -10,6 +10,29 @@ Welcome to this "Grover Simulation" page!
 * 出力されたシミュレーション結果に対して逐次グラフや回路図を表示して可視化します。
 * ビット数や探索対象について、ユーザが最初に値を入力することができます。
 
+## このプロジェクトでの全体像
+```
+OptimizationProblem（抽象クラス）
+  ├── abstractmethod: encode()
+  ├── abstractmethod: decode()
+  ├── abstractmethod: cost()
+  ├── abstractmethod: is_feasible()
+  ├── abstractmethod: n_qubits_required()
+  ├── abstractmethod: describe()
+  └── 通常メソッド: make_condition()  ← 共通処理
+
+        ↓ 継承
+
+VehicleRoutingProblem     KnapsackProblem     SchedulingProblem
+  └── cost(): 距離計算      └── cost(): 価値計算  └── cost(): 時間計算
+  └── encode(): ルート→bits └── encode(): ...    └── encode(): ...
+  └── ...                   └── ...              └── ...
+
+…作成中
+```
+
+
+
 ## 推奨環境
 - Python 3.12 以上
 - qiskit
