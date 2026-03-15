@@ -202,6 +202,7 @@ def solve(
     condition: Callable[[str], bool] | None = None,
     threshold: float | None = None,
     top_k: int = 5,
+    noise_model=None,
     ancilla_mode: str = "single",
 ) -> dict:
     """Grover のアルゴリズムで最適解を探索する。
@@ -302,7 +303,7 @@ def solve(
     # --- シミュレーション実行 ---
     simulator = AerSimulator()
     compiled = transpile(circuit, simulator)
-    job = simulator.run(compiled, shots=shots)
+    job = simulator.run(compiled, shots=shots, noise_model=noise_model)
     counts = job.result().get_counts()
 
     # --- 結果の解析（リトルエンディアン → ビッグエンディアン）---

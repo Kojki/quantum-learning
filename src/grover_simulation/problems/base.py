@@ -138,6 +138,28 @@ class OptimizationProblem(ABC):
     @abstractmethod
     def describe(self) -> str:
         """問題の概要を文字列で返す。可視化・README・デバッグ出力に使う。"""
+
+    @abstractmethod
+    def route_to_str(self, bitstring: str) -> str:
+        """ビット文字列を人間が読めるルート表示に変換する。
+
+        brute_force・grover どちらの solve() も返り値の
+        'best_route' キーにこのメソッドの結果を使う。
+        具体的な表示形式は問題クラスごとに実装する。
+
+        Args:
+            bitstring: encode() が返す形式のビット文字列。
+
+        Returns:
+            人間が読める解の表示文字列。
+            例（TSP）    : "A → B → C → A"
+            例（ナップサック）: "item0, item2 を選択"
+
+        Example:
+            ::
+
+                vrp.route_to_str("000110")  # → "A → B → C → A"
+        """
         ...
 
     # ── 共通ユーティリティ ────────────────────────────────────────────────
