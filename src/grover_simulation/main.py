@@ -8,7 +8,7 @@ import numpy as np
 from input_handler import select_config_mode
 from classical.brute_force import solve as bf_solve
 from problems.routing import VehicleRoutingProblem
-from quantum.grover import solve as grover_solve
+from quantum.grover import solve as grover_solve, solve_iterative
 from quantum.noise import (
     build_combined_model,
     build_depolarizing_model,
@@ -18,6 +18,9 @@ from quantum.noise import (
 from benchmark.metrics import compare
 from visualizer.animation import run as run_animation
 from visualizer.state_plotter import run as run_race
+from geo.geocoder import geocode_cities
+from geo.distance import build_distance_matrix
+from geo.map_plotter import plot_route
 
 
 # ---------------------------------------------------------------------------
@@ -70,16 +73,31 @@ def _print_result(label: str, result: dict, top_k: int = 5) -> None:
     print(f"  最小コスト       : {result['best_cost']}")
     print(f"  実行時間         : {result['elapsed_sec']:.4f} 秒")
 
+    # 古典固有
     if "n_evaluated" in result:
         print(f"  評価した解の数   : {result['n_evaluated']} / {result['n_total']}")
 
+    # Durr-Hoyer 固有
+    if "n_grover_calls" in result:
+        print(f"  Grover 実行回数  : {result['n_grover_calls']}")
+        if "history" in result:
+            print(f"\n  --- 探索の履歴 ---")
+            for entry in result["history"]:
+                mark = "✅" if entry["improved"] else "  "
+                print(
+                    f"  {mark} 反復 {entry['iteration']:2d}  "
+                    f"コスト: {entry['threshold']:.1f}  "
+                    f"ルート: {entry['route']}"
+                )
+
+    # 量子固有
     if "n_iterations" in result:
         print(f"  Grover 反復回数  : {result['n_iterations']}")
         print(f"  回路深さ         : {result['circuit_depth']}")
         print(f"  ancilla モード   : {result.get('mode')}")
         print(f"  使用量子ビット数 : {result.get('n_qubits_total')}")
 
-    if "top_k" in result:
+    if "top_k" in result and result["top_k"]:
         print(f"\n  --- 上位 {top_k} 件の測定結果 ---")
         for i, entry in enumerate(result["top_k"], 1):
             print(
@@ -112,6 +130,16 @@ def main() -> None:
     random.seed(cfg["seed"])
     np.random.seed(cfg["seed"])
 
+    # --- 地名モードの場合：座標取得と距離行列の自動生成 ---
+    coords = None
+    if cfg["use_geo"]:
+        print("\n座標を取得中...")
+        coords = geocode_cities(cfg["city_names"])
+
+        # 取得できた都市だけで続行
+        cfg["city_names"] = list(coords.keys())
+        cfg["distance_matrix"], cfg["city_names"] = build_distance_matrix(coords)
+
     # --- 問題のセットアップ ---
     problem = VehicleRoutingProblem(
         distance_matrix=cfg["distance_matrix"],
@@ -120,23 +148,25 @@ def main() -> None:
     print()
     print(problem.describe())
     print(f"\nノイズモデル     : {cfg['noise_model']}")
-    print(f"コストのしきい値 : {cfg['cost_threshold']}")
 
     # --- 古典：全探索 ---
     bf_result = bf_solve(problem)
     _print_result("古典（全探索）", bf_result)
 
-    # --- 量子：Grover ---
+    # --- 量子：Durr-Hoyer アルゴリズム ---
     noise_model = _build_noise_model(cfg)
-    grover_result = grover_solve(
+    print("\nDurr-Hoyer アルゴリズムで探索中...")
+    grover_result = solve_iterative(
         problem=problem,
         shots=cfg["shots"],
-        threshold=cfg["cost_threshold"],
+        max_iterations=cfg["max_iterations"],
         top_k=5,
         ancilla_mode=cfg["ancilla_mode"],
         noise_model=noise_model,
+        seed=cfg["seed"],
+        verbose=True,
     )
-    _print_result(f"量子（Grover / {cfg['noise_model']}）", grover_result)
+    _print_result(f"量子（Durr-Hoyer / {cfg['noise_model']}）", grover_result)
 
     # --- ベンチマーク比較 ---
     if bf_result.get("status") == "ok" and grover_result.get("status") == "ok":
@@ -149,24 +179,38 @@ def main() -> None:
 
     # --- 可視化 ---
     output_dir = Path(cfg["output_dir"]) if cfg["output_dir"] else None
-
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Grover が解を見つけられなかった場合は可視化をスキップ
+    if grover_result.get("status") != "ok":
+        print("\n⚠️  Grover が解を見つけられなかったため、可視化をスキップします。")
+        return
+
+    # 地図上にルートを描画（地名モードのみ）
+    if coords is not None:
+        print("\n最適ルートを地図上に描画中...")
+        plot_route(
+            coords=coords,
+            best_route=grover_result["best_route"],
+            title=f"Grover が見つけた最短ルート（{cfg['noise_model']}）",
+            save_path=output_dir / "route_map.png" if output_dir else None,
+        )
 
     print("\n確率変化アニメーションを生成中...")
     run_animation(
         problem=problem,
-        threshold=cfg["cost_threshold"],
+        threshold=grover_result["best_cost"],
         shots=cfg["shots"],
         noise_model=noise_model,
         save_path=output_dir / "grover_animation.gif" if output_dir else None,
         fps=2,
     )
 
-    print("\n古典 vs 量子 レースアニメーションを生成中...")
+    print("\n古典 量子 比較アニメーションを生成中...")
     run_race(
         problem=problem,
-        threshold=cfg["cost_threshold"],
+        threshold=grover_result["best_cost"],
         shots=cfg["shots"],
         noise_model=noise_model,
         seed=cfg["seed"],

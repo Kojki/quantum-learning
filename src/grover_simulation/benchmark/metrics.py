@@ -83,33 +83,44 @@ def _extract_classical(result: dict, n_space: int) -> dict:
 
 
 def _extract_quantum(result: dict, n_space: int) -> dict:
-    """量子結果からメトリクスを抽出する。"""
+    """量子結果からメトリクスを抽出する。
+
+    solve() と solve_iterative() の両方の返り値に対応する。
+    """
     if result.get("status") != "ok":
         return {
             "status": result.get("status"),
             "elapsed_sec": result.get("elapsed_sec"),
         }
 
-    # 成功確率：top_k の中で最良解のカウント割合
+    # 成功確率の算出
     success_prob = None
-    if "top_k" in result and "best_bitstring" in result:
+    if "top_k" in result and result["top_k"] and "best_bitstring" in result:
         best_bs = result["best_bitstring"]
         counts = result.get("counts", {})
-        total = sum(counts.values())
-        best_count = counts.get(best_bs, 0)
-        success_prob = round(best_count / total, 4) if total > 0 else 0.0
+        if counts:
+            total = sum(counts.values())
+            best_count = counts.get(best_bs, 0)
+            success_prob = round(best_count / total, 4) if total > 0 else 0.0
 
-    return {
+    # solve() 固有のキー（solve_iterative() にはない場合は None）
+    metrics = {
         "status": "ok",
         "best_cost": result["best_cost"],
         "best_route": result["best_route"],
-        "n_iterations": result["n_iterations"],
-        "circuit_depth": result["circuit_depth"],
+        "elapsed_sec": result["elapsed_sec"],
+        "success_prob": success_prob,
+        # solve() 固有
+        "n_iterations": result.get("n_iterations"),
+        "circuit_depth": result.get("circuit_depth"),
         "n_qubits_total": result.get("n_qubits_total"),
         "ancilla_mode": result.get("mode"),
-        "success_prob": success_prob,
-        "elapsed_sec": result["elapsed_sec"],
+        # solve_iterative() 固有
+        "n_grover_calls": result.get("n_grover_calls"),
+        "history": result.get("history"),
     }
+
+    return metrics
 
 
 def _make_comparison(
@@ -155,6 +166,17 @@ def _make_summary(
     n_space: int,
 ) -> str:
     """人間が読める要約文字列を返す。"""
+    # 量子側の表示：solve() と solve_iterative() で異なる行を出し分ける
+    if quantum.get("n_grover_calls") is not None:
+        quantum_detail = (
+            f"    Grover 実行回数 : {quantum.get('n_grover_calls', 'N/A')}\n"
+        )
+    else:
+        quantum_detail = (
+            f"    反復回数        : {quantum.get('n_iterations', 'N/A')}\n"
+            f"    回路深さ        : {quantum.get('circuit_depth', 'N/A')}\n"
+        )
+
     lines = [
         f"{'=' * 55}",
         f"  ベンチマーク結果サマリー",
@@ -167,18 +189,17 @@ def _make_summary(
         f"    評価した解   : {classical.get('n_evaluated', 'N/A')} 件",
         f"    実行時間     : {classical.get('elapsed_sec', 0):.4f} 秒",
         f"",
-        f"  【量子（Grover）】",
+        f"  【量子（Durr-Hoyer）】",
         f"    最適ルート   : {quantum.get('best_route', 'N/A')}",
         f"    最小コスト   : {quantum.get('best_cost', 'N/A')}",
-        f"    反復回数     : {quantum.get('n_iterations', 'N/A')}",
-        f"    回路深さ     : {quantum.get('circuit_depth', 'N/A')}",
+        quantum_detail.rstrip(),
         f"    成功確率     : {quantum.get('success_prob', 'N/A')}",
         f"    実行時間     : {quantum.get('elapsed_sec', 0):.4f} 秒",
         f"",
         f"  【比較】",
         f"    最適解一致   : {'✅' if comparison.get('optimal_match') else '❌'}",
-        f"    理論加速度   : {comparison.get('speedup_theoretical', 'N/A')} 倍（√N優位）",
-        f"    実測加速度   : {comparison.get('speedup_actual', 'N/A')} 倍（シミュレータ時間）",
+        f"    理論加速度   : {comparison.get('speedup_theoretical', 'N/A')} 倍（√N 優位）",
+        f"    実測加速度   : {comparison.get('speedup_actual', 'N/A')} 倍（シミュレーター時間）",
         f"{'=' * 55}",
     ]
     return "\n".join(lines)

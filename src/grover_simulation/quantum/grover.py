@@ -357,3 +357,188 @@ def solve(
         # ancilla 情報（mode に応じて内容が変わる）
         **ancilla_info,
     }
+
+
+# ---------------------------------------------------------------------------
+# 6. Durr-Hoyer アルゴリズム（反復的しきい値探索）
+# ---------------------------------------------------------------------------
+
+
+def solve_iterative(
+    problem: "OptimizationProblem",
+    shots: int = 1024,
+    max_iterations: int = 10,
+    top_k: int = 5,
+    ancilla_mode: str = "single",
+    noise_model=None,
+    seed: int | None = None,
+    verbose: bool = True,
+) -> dict:
+    """Durr-Hoyer アルゴリズムで最適解を探索する。
+
+    閾値を事前に指定せず、反復的にしきい値を下げながら最適解に近づく。
+
+    アルゴリズムの流れ:
+        1. 実行可能解からランダムに1つ選び、そのコストを初期閾値とする。
+        2. 「現在の閾値より良い解」を探す Grover を実行する。
+        3. より良い解が見つかればしきい値を更新して 2 に戻る。
+        4. 見つからなければ現在の最良解を返す。
+
+    出典:
+        Durr, C. & Hoyer, P., "A quantum algorithm for finding the minimum",
+        arXiv:quant-ph/9607014, 1996.
+
+    Args:
+        problem: OptimizationProblem のインスタンス。
+        shots: 各反復のショット数。
+        max_iterations: 最大反復回数。これを超えたら現在の最良解を返す。
+        top_k: 返り値 top_k リストの件数。
+        ancilla_mode: ancilla の使い方（'single' / 'extra' / 'compare'）。
+        noise_model: ノイズモデル。None の場合は理想シミュレーション。
+        seed: 乱数シード（初期解のランダム選択に使用）。
+        verbose: True のとき各反復の状況を表示する。
+
+    Returns:
+        以下のキーを持つ辞書。
+
+        - ``status``: 'ok' または 'no_feasible_solution'
+        - ``best_bitstring``: 最良解のビット列
+        - ``best_cost``: 最小コスト
+        - ``best_route``: ルート表示文字列
+        - ``n_grover_calls``: Grover を実行した回数
+        - ``history``: 各反復での閾値更新履歴
+        - ``elapsed_sec``: 総実行時間
+    """
+    import random as _random
+    import time
+
+    rng = _random.Random(seed)
+    start = time.perf_counter()
+    n_qubits = problem.n_qubits_required()
+
+    # --- 実行可能解の列挙 ---
+    all_bitstrings = [format(i, f"0{n_qubits}b") for i in range(2**n_qubits)]
+    feasible = [bs for bs in all_bitstrings if problem.is_feasible(bs)]
+
+    if not feasible:
+        return {
+            "status": "no_feasible_solution",
+            "elapsed_sec": time.perf_counter() - start,
+        }
+
+    # --- 初期解をランダムに選ぶ ---
+    current_best = rng.choice(feasible)
+    current_threshold = problem.cost(current_best)
+
+    if verbose:
+        print(
+            f"\n  初期解: {problem.route_to_str(current_best)}"
+            f"  コスト: {current_threshold:.1f}"
+        )
+
+    history = [
+        {
+            "iteration": 0,
+            "threshold": current_threshold,
+            "bitstring": current_best,
+            "route": problem.route_to_str(current_best),
+            "improved": False,
+        }
+    ]
+    n_grover_calls = 0
+
+    # --- 反復的探索 ---
+    for i in range(1, max_iterations + 1):
+        # 現在の閾値より良い解を探す条件
+        condition = make_condition_from_cost(
+            cost_fn=problem.cost,
+            threshold=current_threshold,
+            feasibility_fn=problem.is_feasible,
+        )
+
+        # 条件を満たす解が存在するか確認
+        from quantum.oracle import _enumerate_targets
+
+        targets = _enumerate_targets(n_qubits, condition)
+
+        if not targets:
+            if verbose:
+                print(f"  反復 {i}: これ以上改善できる解がありません。探索終了。")
+            break
+
+        # Grover で探索
+        result = solve(
+            problem=problem,
+            shots=shots,
+            condition=condition,
+            top_k=top_k,
+            ancilla_mode=ancilla_mode,
+            noise_model=noise_model,
+        )
+        n_grover_calls += 1
+
+        if result.get("status") == "ok":
+            new_cost = result["best_cost"]
+            new_bitstring = result["best_bitstring"]
+
+            if new_cost < current_threshold:
+                # より良い解が見つかった
+                current_threshold = new_cost
+                current_best = new_bitstring
+                improved = True
+
+                if verbose:
+                    print(
+                        f"  反復 {i}: 改善 ✅  "
+                        f"{problem.route_to_str(new_bitstring)}"
+                        f"  コスト: {new_cost:.1f}"
+                    )
+            else:
+                improved = False
+                if verbose:
+                    print(f"  反復 {i}: 改善なし（コスト {new_cost:.1f}）")
+        else:
+            improved = False
+            if verbose:
+                print(f"  反復 {i}: 解が見つかりませんでした。")
+
+        history.append(
+            {
+                "iteration": i,
+                "threshold": current_threshold,
+                "bitstring": current_best,
+                "route": problem.route_to_str(current_best),
+                "improved": improved,
+            }
+        )
+
+        # 改善がなければ終了
+        if not improved:
+            break
+
+    elapsed = time.perf_counter() - start
+
+    # top_k の生成（最終反復の counts から）
+    top_k_list = []
+    if n_grover_calls > 0 and result.get("status") == "ok":
+        counts = result.get("counts", {})
+        total = sum(counts.values())
+        top_k_list = [
+            {
+                "bitstring": bs,
+                "count": cnt,
+                "probability": round(cnt / total, 4),
+            }
+            for bs, cnt in sorted(counts.items(), key=lambda x: -x[1])[:top_k]
+        ]
+
+    return {
+        "status": "ok",
+        "best_bitstring": current_best,
+        "best_cost": current_threshold,
+        "best_route": problem.route_to_str(current_best),
+        "n_grover_calls": n_grover_calls,
+        "history": history,
+        "top_k": top_k_list,
+        "elapsed_sec": elapsed,
+    }

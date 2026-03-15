@@ -13,22 +13,40 @@ import config
 
 
 # ---------------------------------------------------------------------------
+# サンプル問題
+# ---------------------------------------------------------------------------
+
+SAMPLE_PROBLEMS = {
+    "1": {
+        "label": "日本の主要都市（4都市）",
+        "city_names": ["東京", "大阪", "名古屋", "福岡"],
+        "use_geo": True,
+    },
+    "2": {
+        "label": "ヨーロッパの主要都市（4都市）",
+        "city_names": ["London", "Paris", "Berlin", "Rome"],
+        "use_geo": True,
+    },
+    "3": {
+        "label": "シンプルなテスト問題（3都市・距離は手動設定）",
+        "city_names": ["A", "B", "C"],
+        "use_geo": False,
+        "distance_matrix": [
+            [0, 10, 25],
+            [10, 0, 15],
+            [25, 15, 0],
+        ],
+    },
+}
+
+
+# ---------------------------------------------------------------------------
 # 内部ユーティリティ
 # ---------------------------------------------------------------------------
 
 
 def _ask(prompt: str, default) -> str:
-    """デフォルト値付きの入力プロンプトを表示し、入力文字列を返す。
-
-    何も入力せずにEnterを押した場合はデフォルト値を文字列に変換して返す。
-
-    Args:
-        prompt: 表示するプロンプト文字列。
-        default: デフォルト値。
-
-    Returns:
-        入力された文字列、または str(default)。
-    """
+    """デフォルト値付きの入力プロンプトを表示し、入力文字列を返す。"""
     raw = input(f"{prompt} [デフォルト: {default}]: ").strip()
     return raw if raw else str(default)
 
@@ -40,7 +58,7 @@ def _ask_int(prompt: str, default: int) -> int:
         try:
             return int(raw)
         except ValueError:
-            print(f"  ⚠️  整数で入力してください。")
+            print("  ⚠️  整数で入力してください。")
 
 
 def _ask_float(prompt: str, default: float) -> float:
@@ -50,7 +68,7 @@ def _ask_float(prompt: str, default: float) -> float:
         try:
             return float(raw)
         except ValueError:
-            print(f"  ⚠️  数値で入力してください。")
+            print("  ⚠️  数値で入力してください。")
 
 
 def _ask_choice(prompt: str, choices: list[str], default: str) -> str:
@@ -64,32 +82,93 @@ def _ask_choice(prompt: str, choices: list[str], default: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 各項目の入力
+# 都市・距離行列の入力（3パターン）
 # ---------------------------------------------------------------------------
 
 
-def _input_city_names() -> list[str]:
-    """都市名をカンマ区切りで入力する。"""
-    default_str = ",".join(config.CITY_NAMES)
+def _input_by_count() -> tuple[list[str], list[list[float]], bool]:
+    """都市数だけ指定し、名前は A, B, C... と自動設定する。
+
+    Returns:
+        (city_names, distance_matrix, use_geo)
+    """
     while True:
-        raw = _ask("都市名（カンマ区切り、2都市以上）", default_str)
+        n = _ask_int("都市数（2以上）", len(config.CITY_NAMES))
+        if n >= 2:
+            break
+        print("  ⚠️  2以上を入力してください。")
+
+    city_names = [chr(ord("A") + i) for i in range(n)]
+    print(f"  都市名を自動設定しました: {city_names}")
+    distance_matrix = _input_distance_matrix(city_names)
+    return city_names, distance_matrix, False
+
+
+def _input_by_name() -> tuple[list[str], list[list[float]], bool]:
+    """都市名を入力し、座標自動取得か距離手動入力かを選ぶ。
+
+    Returns:
+        (city_names, distance_matrix, use_geo)
+    """
+    while True:
+        raw = _ask(
+            "都市名（カンマ区切り、2都市以上）",
+            ",".join(config.CITY_NAMES),
+        )
         names = [n.strip() for n in raw.split(",") if n.strip()]
         if len(names) >= 2:
-            return names
+            break
         print("  ⚠️  2都市以上を入力してください。")
+
+    print("\n距離の設定方法を選んでください：")
+    print("  1. 地名から座標を自動取得して実距離を計算する（インターネット接続が必要）")
+    print("  2. 距離行列を手動で入力する")
+
+    while True:
+        choice = input("選択 [1/2]: ").strip()
+        if choice == "1":
+            return names, [], True  # distance_matrix は geo モジュールが生成
+        if choice == "2":
+            matrix = _input_distance_matrix(names)
+            return names, matrix, False
+        print("  ⚠️  1 または 2 を入力してください。")
+
+
+def _input_by_sample() -> tuple[list[str], list[list[float]], bool]:
+    """用意されたサンプル問題を選ぶ。
+
+    Returns:
+        (city_names, distance_matrix, use_geo)
+    """
+    print("\nサンプル問題を選んでください：")
+    for key, sample in SAMPLE_PROBLEMS.items():
+        print(f"  {key}. {sample['label']}")
+
+    while True:
+        choice = input("選択: ").strip()
+        if choice in SAMPLE_PROBLEMS:
+            sample = SAMPLE_PROBLEMS[choice]
+            print(f"  「{sample['label']}」を選択しました。")
+            if sample["use_geo"]:
+                return sample["city_names"], [], True
+            else:
+                return (
+                    sample["city_names"],
+                    sample["distance_matrix"],
+                    False,
+                )
+        print(f"  ⚠️  {'/'.join(SAMPLE_PROBLEMS.keys())} のいずれかを入力してください。")
 
 
 def _input_distance_matrix(city_names: list[str]) -> list[list[float]]:
     """距離行列を1行ずつ入力する。"""
     n = len(city_names)
     print(f"\n  距離行列を入力します（{n}×{n}、スペース区切り）。")
-    print(f"  対角成分（自分→自分）は 0 にしてください。")
+    print("  対角成分（自分→自分）は 0 にしてください。")
 
-    # デフォルト値の準備（config と都市数が一致する場合はそのまま使う）
     if len(config.DISTANCE_MATRIX) == n:
         default_matrix = config.DISTANCE_MATRIX
     else:
-        # 都市数が異なる場合は単純なデフォルト行列を生成
         default_matrix = [
             [0 if i == j else (i + j + 1) * 5 for j in range(n)] for i in range(n)
         ]
@@ -116,17 +195,33 @@ def _input_distance_matrix(city_names: list[str]) -> list[list[float]]:
     return matrix
 
 
-def _input_gif_path() -> str | None:
-    """GIF保存先パスを入力する。空欄ならウィンドウ表示。"""
-    default_str = str(Path("output"))
-    raw = input(
-        f"  GIF 保存先ディレクトリ（空欄でウィンドウ表示）[デフォルト: {default_str}]: "
-    ).strip()
-    if not raw:
-        raw = default_str
-    if raw.lower() in ("none", "なし", ""):
-        return None
-    return raw
+# ---------------------------------------------------------------------------
+# 都市入力モードの選択
+# ---------------------------------------------------------------------------
+
+
+def _select_city_input_mode() -> tuple[list[str], list[list[float]], bool]:
+    """都市の入力方法を選ぶ。
+
+    Returns:
+        (city_names, distance_matrix, use_geo)
+        use_geo が True の場合、distance_matrix は空リストで返す。
+        main.py 側で geo モジュールを使って距離行列を生成する。
+    """
+    print("\n【都市の入力方法】")
+    print("  1. 都市数だけ指定する（名前は A, B, C... と自動設定）")
+    print("  2. 都市名を自分で入力する")
+    print("  3. サンプル問題を選ぶ")
+
+    while True:
+        choice = input("選択 [1/2/3]: ").strip()
+        if choice == "1":
+            return _input_by_count()
+        if choice == "2":
+            return _input_by_name()
+        if choice == "3":
+            return _input_by_sample()
+        print("  ⚠️  1、2、3 のいずれかを入力してください。")
 
 
 # ---------------------------------------------------------------------------
@@ -137,26 +232,25 @@ def _input_gif_path() -> str | None:
 def load_config_interactive() -> dict:
     """対話形式で設定を入力し、設定辞書を返す。
 
-    各項目でEnterを押すと config.py のデフォルト値が使われる。
-
     Returns:
         以下のキーを持つ設定辞書：
-            city_names, distance_matrix, cost_threshold,
-            shots, ancilla_mode, noise_model, device,
-            gate_time_1q, seed, output_dir
+            city_names, distance_matrix, use_geo,
+            cost_threshold, shots, ancilla_mode,
+            noise_model, device, gate_time_1q,
+            seed, output_dir
     """
     print("\n" + "=" * 50)
     print("  対話形式で設定を入力します。")
     print("  Enterを押すとデフォルト値を使用します。")
     print("=" * 50)
 
-    # --- 問題の設定 ---
+    # --- 都市の設定 ---
     print("\n【問題の設定】")
-    city_names = _input_city_names()
-    distance_matrix = _input_distance_matrix(city_names)
-    cost_threshold = _ask_float(
-        "コストのしきい値（この値以下のルートを正解とする）",
-        config.COST_THRESHOLD,
+    city_names, distance_matrix, use_geo = _select_city_input_mode()
+
+    max_iterations = _ask_int(
+        "\nDurr-Hoyer の最大反復回数",
+        config.MAX_ITERATIONS,
     )
 
     # --- シミュレーションの設定 ---
@@ -190,7 +284,8 @@ def load_config_interactive() -> dict:
     return {
         "city_names": city_names,
         "distance_matrix": distance_matrix,
-        "cost_threshold": cost_threshold,
+        "use_geo": use_geo,
+        "max_iterations": max_iterations,
         "shots": shots,
         "ancilla_mode": ancilla_mode,
         "noise_model": noise_model,
@@ -201,12 +296,26 @@ def load_config_interactive() -> dict:
     }
 
 
+def _input_gif_path() -> str | None:
+    """GIF保存先パスを入力する。空欄ならウィンドウ表示。"""
+    default_str = str(Path("output"))
+    raw = input(
+        f"  GIF 保存先ディレクトリ（空欄でウィンドウ表示）[デフォルト: {default_str}]: "
+    ).strip()
+    if not raw:
+        raw = default_str
+    if raw.lower() in ("none", "なし"):
+        return None
+    return raw
+
+
 def load_config_from_file() -> dict:
     """config.py の設定をそのまま辞書として返す。"""
     return {
         "city_names": config.CITY_NAMES,
         "distance_matrix": config.DISTANCE_MATRIX,
-        "cost_threshold": config.COST_THRESHOLD,
+        "use_geo": False,
+        "max_iterations": config.MAX_ITERATIONS,
         "shots": config.SHOTS,
         "ancilla_mode": config.ANCILLA_MODE,
         "noise_model": config.NOISE_MODEL,
@@ -218,11 +327,7 @@ def load_config_from_file() -> dict:
 
 
 def select_config_mode() -> dict:
-    """起動時に config.py を使うか対話入力するかを選ぶ。
-
-    Returns:
-        load_config_from_file() または load_config_interactive() の結果。
-    """
+    """起動時に config.py を使うか対話入力するかを選ぶ。"""
     print("\n" + "=" * 50)
     print("  Grover シミュレーター")
     print("=" * 50)
