@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.sensing.core import iterative_phase_estimation, feedback_control_step
-from src.sensing.control import PIDController
+from src.sensing.ipe_algorithm import iterative_phase_estimation, feedback_control_step
+from src.sensing.pid_control import PIDController
 
 SENSITIVITY = 1.0
 TARGET_LOCK_BIAS = np.pi / 2

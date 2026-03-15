@@ -8,10 +8,10 @@ from qiskit import QuantumCircuit, transpile
 from qiskit.circuit import Gate
 from qiskit_aer import AerSimulator
 
-from quantum.oracle import build_oracle, make_condition_from_cost
+from .oracle import build_oracle, make_condition_from_cost
 
 if TYPE_CHECKING:
-    from problems.base import OptimizationProblem
+    from ..problems.base import OptimizationProblem
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ def solve(
         elapsed = time.perf_counter() - start
         return {"status": "no_solution", "error": str(e), "elapsed_sec": elapsed}
 
-    from quantum.oracle import _enumerate_targets
+    from .oracle import _enumerate_targets
 
     n_targets = len(_enumerate_targets(n_qubits, condition))
     n_iterations = optimal_iterations(n_qubits, n_targets)

@@ -5,8 +5,8 @@ from qiskit import transpile
 from qiskit_aer import AerSimulator
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.sensing.core import iterative_phase_estimation, feedback_control_step
-from src.sensing.control import PIDController
+from src.sensing.ipe_algorithm import iterative_phase_estimation, feedback_control_step
+from src.sensing.pid_control import PIDController
 
 
 def main():

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
-from src.sensing.core import feedback_control_step, iterative_phase_estimation
+from src.sensing.ipe_algorithm import feedback_control_step, iterative_phase_estimation
 
 
 def main():
