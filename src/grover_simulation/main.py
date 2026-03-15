@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 
-import config
+from input_handler import select_config_mode
 from classical.brute_force import solve as bf_solve
 from problems.routing import VehicleRoutingProblem
 from quantum.grover import solve as grover_solve
@@ -25,30 +25,20 @@ from visualizer.state_plotter import run as run_race
 # ---------------------------------------------------------------------------
 
 
-def _build_noise_model():
-    """config.NOISE_MODEL に応じてノイズモデルを返す。
-
-    Returns:
-        NoiseModel または None（理想の場合）。
-
-    Raises:
-        ValueError: config.NOISE_MODEL が不正な値の場合。
-    """
-    mode = config.NOISE_MODEL
+def _build_noise_model(cfg: dict):
+    """設定辞書に応じてノイズモデルを返す。"""
+    mode = cfg["noise_model"]
 
     if mode == "ideal":
         return build_ideal_model()
-
     if mode == "depol":
         return build_depolarizing_model()
-
     if mode == "thermal":
-        return build_thermal_model(gate_time_1q=config.GATE_TIME_1Q)
-
+        return build_thermal_model(gate_time_1q=cfg["gate_time_1q"])
     if mode == "combined":
         return build_combined_model(
-            device=config.DEVICE,
-            gate_time_1q=config.GATE_TIME_1Q,
+            device=cfg["device"],
+            gate_time_1q=cfg["gate_time_1q"],
         )
 
     raise ValueError(
@@ -62,7 +52,7 @@ def _build_noise_model():
 # ---------------------------------------------------------------------------
 
 
-def _print_result(label: str, result: dict) -> None:
+def _print_result(label: str, result: dict, top_k: int = 5) -> None:
     """solve() の返り値を整形して表示する。"""
     print(f"\n{'=' * 50}")
     print(f"  {label}")
@@ -80,11 +70,9 @@ def _print_result(label: str, result: dict) -> None:
     print(f"  最小コスト       : {result['best_cost']}")
     print(f"  実行時間         : {result['elapsed_sec']:.4f} 秒")
 
-    # 古典固有
     if "n_evaluated" in result:
         print(f"  評価した解の数   : {result['n_evaluated']} / {result['n_total']}")
 
-    # 量子固有
     if "n_iterations" in result:
         print(f"  Grover 反復回数  : {result['n_iterations']}")
         print(f"  回路深さ         : {result['circuit_depth']}")
@@ -92,7 +80,7 @@ def _print_result(label: str, result: dict) -> None:
         print(f"  使用量子ビット数 : {result.get('n_qubits_total')}")
 
     if "top_k" in result:
-        print(f"\n  --- 上位 {config.TOP_K} 件の測定結果 ---")
+        print(f"\n  --- 上位 {top_k} 件の測定結果 ---")
         for i, entry in enumerate(result["top_k"], 1):
             print(
                 f"  {i}. {entry['bitstring']}"
@@ -100,7 +88,6 @@ def _print_result(label: str, result: dict) -> None:
                 f"  確率={entry['probability']:.3f}"
             )
 
-    # compare モード固有
     if "ancilla_comparison" in result:
         print("\n  --- ancilla モード比較 ---")
         for mode_name, info in result["ancilla_comparison"].items():
@@ -118,34 +105,38 @@ def _print_result(label: str, result: dict) -> None:
 
 
 def main() -> None:
+    # --- 設定の読み込み ---
+    cfg = select_config_mode()
+
     # --- 乱数シード固定 ---
-    random.seed(config.SEED)
-    np.random.seed(config.SEED)
+    random.seed(cfg["seed"])
+    np.random.seed(cfg["seed"])
 
     # --- 問題のセットアップ ---
     problem = VehicleRoutingProblem(
-        distance_matrix=config.DISTANCE_MATRIX,
-        city_names=config.CITY_NAMES,
+        distance_matrix=cfg["distance_matrix"],
+        city_names=cfg["city_names"],
     )
+    print()
     print(problem.describe())
-    print(f"\nノイズモデル     : {config.NOISE_MODEL}")
-    print(f"コストのしきい値 : {config.COST_THRESHOLD}")
+    print(f"\nノイズモデル     : {cfg['noise_model']}")
+    print(f"コストのしきい値 : {cfg['cost_threshold']}")
 
     # --- 古典：全探索 ---
     bf_result = bf_solve(problem)
     _print_result("古典（全探索）", bf_result)
 
     # --- 量子：Grover ---
-    noise_model = _build_noise_model()
+    noise_model = _build_noise_model(cfg)
     grover_result = grover_solve(
         problem=problem,
-        shots=config.SHOTS,
-        threshold=config.COST_THRESHOLD,
-        top_k=config.TOP_K,
-        ancilla_mode=config.ANCILLA_MODE,
+        shots=cfg["shots"],
+        threshold=cfg["cost_threshold"],
+        top_k=5,
+        ancilla_mode=cfg["ancilla_mode"],
         noise_model=noise_model,
     )
-    _print_result(f"量子（Grover / {config.NOISE_MODEL}）", grover_result)
+    _print_result(f"量子（Grover / {cfg['noise_model']}）", grover_result)
 
     # --- ベンチマーク比較 ---
     if bf_result.get("status") == "ok" and grover_result.get("status") == "ok":
@@ -157,33 +148,35 @@ def main() -> None:
         print(f"\n{report['summary']}")
 
     # --- 可視化 ---
-    # 出力先フォルダ
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
+    output_dir = Path(cfg["output_dir"]) if cfg["output_dir"] else None
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n確率変化アニメーションを生成中...")
     run_animation(
         problem=problem,
-        threshold=config.COST_THRESHOLD,
-        shots=config.SHOTS,
+        threshold=cfg["cost_threshold"],
+        shots=cfg["shots"],
         noise_model=noise_model,
-        save_path=output_dir / "grover_animation.gif",
-        fps=config.ANIMATION_FPS,
+        save_path=output_dir / "grover_animation.gif" if output_dir else None,
+        fps=2,
     )
 
     print("\n古典 vs 量子 レースアニメーションを生成中...")
     run_race(
         problem=problem,
-        threshold=config.COST_THRESHOLD,
-        shots=config.SHOTS,
+        threshold=cfg["cost_threshold"],
+        shots=cfg["shots"],
         noise_model=noise_model,
-        seed=config.SEED,
-        save_path=output_dir / "classical_vs_quantum.gif",
-        fps=config.ANIMATION_FPS,
+        seed=cfg["seed"],
+        save_path=output_dir / "classical_vs_quantum.gif" if output_dir else None,
+        fps=2,
     )
 
     print("\nすべての出力が完了しました。")
-    print(f"保存先: {output_dir.resolve()}")
+    if output_dir:
+        print(f"保存先: {output_dir.resolve()}")
 
 
 if __name__ == "__main__":
