@@ -193,41 +193,71 @@ def build_depolarizing_model(
 
 
 def build_thermal_model(
-    t1: float = IBM_EAGLE_R3["t1"],
-    t2: float = IBM_EAGLE_R3["t2"],
-    gate_time_1q: float = IBM_EAGLE_R3["gate_time_1q"],
-    gate_time_2q: float = IBM_EAGLE_R3["gate_time_2q"],
-    gate_time_measure: float = IBM_EAGLE_R3["gate_time_measure"],
+    t1: float | None = None,
+    t2: float | None = None,
+    gate_time_1q: float | None = None,
+    gate_time_2q: float | None = None,
+    gate_time_measure: float | None = None,
     gates_1q: list[str] = _GATES_1Q,
     gates_2q: list[str] = _GATES_2Q,
 ) -> NoiseModel:
     """熱緩和エラー（T1・T2）のみのノイズモデルを構築する。
 
+    引数を省略した場合は IBM Eagle r3 の実測値をデフォルトとして使う。
+    ただし ``gate_time_1q`` は全プリセットで出典未確認（None）のため、
+    省略すると ValueError を送出する。必ず値を直接渡すこと。
+
     理論的背景: references/noise_models.md「熱緩和エラー」参照。
 
     Args:
-        t1: 振幅緩和時間（秒）。
-        t2: 位相緩和時間（秒）。T2 <= 2*T1 の制約あり。
+        t1: 振幅緩和時間（秒）。省略時は Eagle r3 実測値（269.50 μs）。
+        t2: 位相緩和時間（秒）。T2 <= 2*T1 の制約あり。省略時は Eagle r3 実測値（183.99 μs）。
         gate_time_1q: 1量子ビットゲートの実行時間（秒）。
-        gate_time_2q: 2量子ビットゲートの実行時間（秒）。
-        gate_time_measure: 測定操作の実行時間（秒）。
+                      ⚠️ 全プリセットで出典未確認のため、必ず値を渡すこと。
+        gate_time_2q: 2量子ビットゲートの実行時間（秒）。省略時は Eagle r3 実測値（533.333 ns）。
+        gate_time_measure: 測定操作の実行時間（秒）。省略時は Eagle r3 実測値（1244.444 ns）。
         gates_1q: エラーを適用する 1Q ゲート名のリスト（デフォルト: _GATES_1Q）。
         gates_2q: エラーを適用する 2Q ゲート名のリスト（デフォルト: _GATES_2Q）。
+
+    Raises:
+        ValueError: gate_time_1q が None のまま呼ばれた場合。
+        ValueError: T2 > 2*T1 の場合。
     """
-    # T2 <= 2*T1 の物理的制約を確認
-    if t2 > 2 * t1:
+    # --- None フォールバック（出典確認済みパラメータのみ Eagle r3 を使う）---
+    _t1 = t1 if t1 is not None else IBM_EAGLE_R3["t1"]
+    _t2 = t2 if t2 is not None else IBM_EAGLE_R3["t2"]
+    _gate_time_2q = (
+        gate_time_2q if gate_time_2q is not None else IBM_EAGLE_R3["gate_time_2q"]
+    )
+    _gate_time_measure = (
+        gate_time_measure
+        if gate_time_measure is not None
+        else IBM_EAGLE_R3["gate_time_measure"]
+    )
+
+    # gate_time_1q は全プリセットで None のため、省略を許可しない
+    if gate_time_1q is None:
         raise ValueError(
-            f"T2 ({t2 * 1e6:.1f} μs) が 2*T1 ({2 * t1 * 1e6:.1f} μs) を超えています。"
+            "gate_time_1q の出典が確認できていません。"
+            "全プリセットで未掲載のため、値を直接渡してください。"
+            "（例: gate_time_1q=50e-9 ← SX ゲートの代表的な値）"
+        )
+    _gate_time_1q = gate_time_1q
+
+    # T2 <= 2*T1 の物理的制約を確認
+    if _t2 > 2 * _t1:
+        raise ValueError(
+            f"T2 ({_t2 * 1e6:.1f} μs) が 2*T1 ({2 * _t1 * 1e6:.1f} μs) を超えています。"
         )
 
     noise_model = NoiseModel()
 
     # すべての時間をナノ秒に統一してから渡す
-    t1_ns = _to_ns(t1)
-    t2_ns = _to_ns(t2)
-    gate_time_1q_ns = _to_ns(gate_time_1q)
-    gate_time_2q_ns = _to_ns(gate_time_2q)
-    gate_time_meas_ns = _to_ns(gate_time_measure)
+    t1_ns = _to_ns(_t1)
+    t2_ns = _to_ns(_t2)
+    gate_time_1q_ns = _to_ns(_gate_time_1q)
+    gate_time_2q_ns = _to_ns(_gate_time_2q)
+    gate_time_meas_ns = _to_ns(_gate_time_measure)
 
     error_1q = thermal_relaxation_error(t1_ns, t2_ns, gate_time_1q_ns)
     error_2q = thermal_relaxation_error(t1_ns, t2_ns, gate_time_2q_ns)
@@ -290,7 +320,7 @@ def build_combined_model(
     個別パラメータを渡すとプリセット値を上書きできる。
 
     ⚠️ heron_r3 は一部パラメータが出典未確認のため、そのままでは使えない場合がある。
-    heron_r3 を使う場合は、None になっているパラメータを個別に渡してください。
+    heron_r3 を使う場合は、None になっているパラメータを個別に渡すこと。
 
     Args:
         device: プリセット名 ('eagle_r3' | 'heron_r1' | 'heron_r2' | 'heron_r3')。
