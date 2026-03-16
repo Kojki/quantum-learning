@@ -1,9 +1,8 @@
-"""対話形式でシミュレーションの設定を入力するモジュール。
+<!-- 対話形式でシミュレーションの設定を入力するモジュール。
 
 main.py から呼び出され、ユーザーの入力を受け取り
 config.py と同じ形式の設定辞書を返す。
-入力を省略した場合は config.py のデフォルト値を使用する。
-"""
+入力を省略した場合は config.py のデフォルト値を使用する。 -->
 
 <!DOCTYPE html>
 <html lang="ja">
@@ -436,18 +435,25 @@ function render() {
  
 function exportCfg() {
   const cfg = {
-    city_names: S.cityNames, use_geo: S.useGeo,
+    city_names: S.cityNames,
+    use_geo: S.useGeo,
     distance_matrix: S.useGeo?[]:S.distMatrix,
-    max_iterations: S.maxIter, shots: S.shots,
-    ancilla_mode: S.ancilla, noise_model: S.noise,
-    device: S.device, seed: S.seed,
+    max_iterations: S.maxIter,
+    shots: S.shots,
+    ancilla_mode: S.ancilla,
+    noise_model: S.noise,
+    device: S.device,
+    seed: S.seed,
     output_dir: S.outputDir||null
   };
-  const pre = document.getElementById('exportResult') || document.createElement('pre');
-  pre.id = 'exportResult';
-  pre.style.cssText = 'background:#f4f4f4;border-radius:8px;padding:1rem;font-size:12px;margin-top:1rem;overflow-x:auto;font-family:monospace;line-height:1.6;';
-  pre.textContent = 'CONFIG = ' + JSON.stringify(cfg, null, 2);
-  document.getElementById('stepContent').appendChild(pre);
+
+  fetch('/submit', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cfg)
+  })
+  .then(res => res.text())
+  .then(msg => alert(msg));
 }
  
 render();

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from input_handler import select_config_mode
+from web_app import get_config_from_web
 
 import random
 from pathlib import Path
@@ -124,7 +124,7 @@ def _print_result(label: str, result: dict, top_k: int = 5) -> None:
 
 
 def main() -> None:
-    cfg = select_config_mode()
+    cfg = get_config_from_web()
 
     random.seed(cfg["seed"])
     np.random.seed(cfg["seed"])
