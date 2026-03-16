@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from input_handler import select_config_mode
+
 import random
 from pathlib import Path
 
 import numpy as np
 
-from input_handler import select_config_mode
 from classical.brute_force import solve as bf_solve
 from problems.routing import VehicleRoutingProblem
 from quantum.grover import solve as grover_solve, solve_iterative
