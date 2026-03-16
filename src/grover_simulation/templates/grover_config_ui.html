@@ -261,7 +261,7 @@ const STEP_CONTENT = [
         <div style="margin-top:10px;">
           <div class="slider-row">
             <input type="range" min="2" max="8" value="${S.cityCount}" step="1"
-              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>String.fromCharCode(65+i));S.distMatrix=[];S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(S.cityCount)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
+              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>String.fromCharCode(65+i));S.distMatrix=[];let _f=1;for(let _i=2;_i<=S.cityCount-1;_i++)_f*=_i;S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(_f)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
             <span class="slider-val" id="cntOut">${S.cityCount}</span>
           </div>
         </div>
@@ -299,7 +299,10 @@ const STEP_CONTENT = [
   },
  
   () => {
-    const optimalNote = Math.max(1, Math.round(Math.PI/4 * Math.sqrt(S.cityNames.length)));
+    const n = S.cityNames.length;
+    let factorial = 1;
+    for (let i = 2; i <= n - 1; i++) factorial *= i;
+    const optimalNote = Math.max(1, Math.round(Math.PI / 4 * Math.sqrt(factorial)));
     return `
     <h2>シミュレーションの設定</h2>
     <p class="step-desc">量子回路とノイズの挙動を設定します。はじめての方はデフォルト値のままで問題ありません。</p>
@@ -313,7 +316,7 @@ const STEP_CONTENT = [
           <span class="slider-val" id="miOut">${S.maxIter}</span>
         </div>
         <div class="hint">
-          Grover 探索の最適な反復回数は <strong>R ≈ (π/4)√N</strong>（N = 解候補数）で与えられます。
+          Grover 探索の最適な反復回数は <strong>R ≈ (π/4)√N</strong>（N = 解候補数 = (都市数−1)!）で与えられます。
           現在の都市数 ${S.cityNames.length} では最適値は <strong>${optimalNote} 回</strong>前後です。
           これを大きく超えると位相が巻き戻り測定確率が下がるため、多ければよいわけではありません。
           Durr-Hoyer アルゴリズムは反復ごとにしきい値を更新して最良解を更新するため、
