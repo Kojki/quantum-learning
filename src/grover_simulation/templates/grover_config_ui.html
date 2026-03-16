@@ -123,38 +123,40 @@ const SAMPLES = {
 const DEVICES = {
   'eagle_r3': {
     label: 'Eagle r3',
-    t1: '269 µs', t2: '184 µs',
-    gt1q: '30 ns ⚠️', gt2q: '533 ns',
-    depol2q: '7.40e-3',
-    provisional: true,
+    t1: '225 µs', t2: '135 µs',
+    gt1q: '60 ns', gt2q: '660 ns',
+    depol2q: '7.46e-3',
+    provisional: false,
   },
   'heron_r1': {
     label: 'Heron r1',
     t1: '176 µs', t2: '134 µs',
     gt1q: '32 ns', gt2q: '68 ns',
-    depol2q: '2.50e-3',
+    depol2q: '2.59e-3',
     provisional: false,
   },
   'heron_r2': {
     label: 'Heron r2',
-    t1: '145 µs', t2: '99 µs',
-    gt1q: '24 ns', gt2q: '68 ns',
-    depol2q: '2.47e-3',
+    t1: '225 µs', t2: '124 µs',
+    gt1q: '32 ns', gt2q: '68 ns',
+    depol2q: '2.28e-3',
     provisional: false,
   },
   'heron_r3': {
     label: 'Heron r3',
-    t1: '293 µs', t2: '323 µs',
-    gt1q: '32 ns', gt2q: '78 ns',
-    depol2q: '1.31e-3',
+    t1: '288 µs', t2: '339 µs',
+    gt1q: '32 ns', gt2q: '68 ns',
+    depol2q: '1.18e-3',
     provisional: false,
   },
 };
- 
+
+
 let S = {
   step: 0, configMode: 'interactive', cityMode: 'sample', sampleId: '1',
   cityCount: 4, cityNames: ['東京', '大阪', '名古屋', '福岡'], useGeo: true, distMatrix: [],
-  maxIter: 10, shots: 1024, ancilla: 'single', noise: 'ideal', device: 'eagle_r3', seed: 42, outputDir: 'output'
+  maxIter: 2, shots: 1024, ancilla: 'single', noise: 'ideal', device: 'eagle_r3',
+  seed: 42, outputDir: 'output'
 };
  
 function chip(group, val, label, onchange) {
@@ -206,7 +208,7 @@ function renderProg() {
 }
  
 function deviceGrid() {
-  const showDevice = S.noise === 'thermal' || S.noise === 'combined';
+  const showDevice = S.noise === 'thermal' || S.noise === 'combined' || S.noise === 'readout';
   if (!showDevice) return '';
   const cards = Object.entries(DEVICES).map(([key, d]) => {
     const sel = S.device === key;
@@ -223,17 +225,10 @@ function deviceGrid() {
       </div>
     </div>`;
   }).join('');
-  const provWarn = DEVICES[S.device] && DEVICES[S.device].provisional ? `
-    <div class="alert-warn" style="margin-top:10px;">
-      <span class="alert-warn-icon">&#9888;</span>
-      <div><strong>Eagle r3 の gate_time_1q は暫定値（30 ns）です。</strong><br>
-      ibm_sherbrooke は退役済みのため実測値が未取得です。<code>noise.py</code> の <code>IBM_EAGLE_R3["gate_time_1q"]</code> を確認してください。</div>
-    </div>` : '';
   return `<div class="field">
     <label>デバイスプリセット</label>
-    <div class="hint" style="margin-bottom:10px;">IBM Quantum の実機パラメータ（T1/T2・ゲート時間・読み出しエラー）を使ってノイズを模擬します。すべて IBM Quantum Platform のキャリブレーションデータより取得した全 qubit 中央値です。</div>
+    <div class="hint" style="margin-bottom:10px;">IBM Quantum の実機パラメータ（T1/T2・ゲート時間・読み出しエラー）を使ってノイズを模擬します。すべて IBM Quantum Platform のキャリブレーションデータより取得した全 qubit 中央値です（2026年3月）。</div>
     <div class="device-grid">${cards}</div>
-    ${provWarn}
   </div>`;
 }
  
@@ -266,7 +261,7 @@ const STEP_CONTENT = [
         <div style="margin-top:10px;">
           <div class="slider-row">
             <input type="range" min="2" max="8" value="${S.cityCount}" step="1"
-              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>String.fromCharCode(65+i));S.distMatrix=[];document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
+              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>String.fromCharCode(65+i));S.distMatrix=[];S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(S.cityCount)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
             <span class="slider-val" id="cntOut">${S.cityCount}</span>
           </div>
         </div>
@@ -304,7 +299,7 @@ const STEP_CONTENT = [
   },
  
   () => {
-    const optimalNote = Math.round(Math.PI/4 * Math.sqrt(S.cityNames.length));
+    const optimalNote = Math.max(1, Math.round(Math.PI/4 * Math.sqrt(S.cityNames.length)));
     return `
     <h2>シミュレーションの設定</h2>
     <p class="step-desc">量子回路とノイズの挙動を設定します。はじめての方はデフォルト値のままで問題ありません。</p>
@@ -317,7 +312,13 @@ const STEP_CONTENT = [
             oninput="S.maxIter=+this.value;document.getElementById('miOut').textContent=this.value">
           <span class="slider-val" id="miOut">${S.maxIter}</span>
         </div>
-        <div class="hint">Grover 探索の反復回数が最適値（現在の都市数では目安 <strong>${optimalNote} 回</strong>前後）を超えると、測定確率が下がって精度が落ちます。多ければよいわけではないので注意してください。Durr-Hoyer アルゴリズムは反復ごとにしきい値を更新するため、この値は探索の打ち切り上限として機能します。</div>
+        <div class="hint">
+          Grover 探索の最適な反復回数は <strong>R ≈ (π/4)√N</strong>（N = 解候補数）で与えられます。
+          現在の都市数 ${S.cityNames.length} では最適値は <strong>${optimalNote} 回</strong>前後です。
+          これを大きく超えると位相が巻き戻り測定確率が下がるため、多ければよいわけではありません。
+          Durr-Hoyer アルゴリズムは反復ごとにしきい値を更新して最良解を更新するため、
+          この値は探索の打ち切り上限として機能します。
+        </div>
       </div>
       <div class="field">
         <label>ショット数</label>
@@ -340,23 +341,13 @@ const STEP_CONTENT = [
         <label>ノイズモデル</label>
         <div class="hint" style="margin-bottom:8px;">現実の量子デバイスのノイズを模擬する方法を選びます。</div>
         ${optCard('noise','ideal','ideal（ノイズなし）','理想的な量子コンピュータのシミュレーションです。アルゴリズムの動作確認やデバッグに最適です。','S.device="eagle_r3";')}
-        ${optCard('noise','depol','depolarizing（脱分極ノイズ）','各ゲート操作に一定確率でランダムなエラーを加えます。シンプルで扱いやすいノイズモデルです。','S.device="eagle_r3";')}
-        ${optCard('noise','thermal','thermal relaxation（熱緩和ノイズ）','実機の T1/T2 緩和時間をもとにノイズを模擬します。デバイスプリセットの選択が必要です。')}
-        ${optCard('noise','combined','combined（複合ノイズ）','脱分極ノイズと熱緩和ノイズを組み合わせた、最もリアルなモデルです。読み出しエラーも含まれます。')}
-        <div class="option-card${S.noise==='readout'?' selected':''}" onclick="S.noise='readout';render()">
-          <div class="option-dot"><div class="option-dot-inner"></div></div>
-          <div class="option-body">
-            <div class="option-title">readout（読み出しエラーのみ） <span class="badge-new">追加</span></div>
-            <div class="option-desc">測定時に発生する読み出しエラー（P(1|0)・P(0|1)）のみを模擬します。ゲートエラーの影響を切り離して測定精度だけを評価したいときに使います。</div>
-          </div>
-        </div>
+        ${optCard('noise','depol','depolarizing（脱分極ノイズ）','各ゲート操作に一定確率でランダムなエラーを加えます。ゲートの忠実度の影響だけを切り出して評価したいときに使います。','S.device="eagle_r3";')}
+        ${optCard('noise','thermal','thermal relaxation（熱緩和ノイズ）','T1・T2 緩和時間とゲート時間をもとにノイズを模擬します。コヒーレンス時間の影響を単独で評価できます。デバイスプリセットの選択が必要です。')}
+        ${optCard('noise','readout','readout（読み出しエラーのみ）','測定時に発生する読み出しエラー（P(1|0)・P(0|1)）のみを模擬します。測定精度の影響だけを切り出して評価したいときに使います。')}
+        ${optCard('noise','combined','combined（複合ノイズ）','脱分極・熱緩和・読み出しの3種のノイズを合わせた、最もリアルなモデルです。実機相当の環境でアルゴリズムを評価できます。デバイスプリセットの選択が必要です。')}
       </div>
       ${deviceGrid()}
-      ${S.noise === 'readout' ? `
-      <div class="alert-info" style="margin-top:10px;">
-        <span class="alert-info-icon">&#9432;</span>
-        <div><strong>main.py への追記が必要です。</strong><br><code>_build_noise_model()</code> に <code>"readout"</code> の分岐を追加してください。<code>build_readout_model()</code> は <code>noise.py</code> に実装済みです。</div>
-      </div>` : ''}
+
     </div>
     <div class="section">
       <div class="section-title">その他</div>
@@ -399,21 +390,10 @@ const STEP_CONTENT = [
       ['乱数シード', S.seed],
       ['出力先', S.outputDir||'（ウィンドウ表示のみ）'],
     ];
-    const showProvWarn = ['thermal','combined'].includes(S.noise) && DEVICES[S.device] && DEVICES[S.device].provisional;
     return `
       <h2>設定の確認</h2>
       <p class="step-desc">入力した設定を確認してください。問題がなければ「コードを生成」をクリックしてください。</p>
-      ${showProvWarn ? `
-      <div class="alert-warn" style="margin-bottom:1rem;">
-        <span class="alert-warn-icon">&#9888;</span>
-        <div><strong>Eagle r3 の gate_time_1q は暫定値（30 ns）です。</strong><br>
-        ibm_sherbrooke が退役済みのため実測値が未取得です。結果の解釈には注意してください。</div>
-      </div>` : ''}
-      ${S.noise==='readout' ? `
-      <div class="alert-info" style="margin-bottom:1rem;">
-        <span class="alert-info-icon">&#9432;</span>
-        <div><strong>readout モードは main.py への追記が必要です。</strong></div>
-      </div>` : ''}
+
       <div class="summary-block">
         ${rows.map(([k,v])=>`<div class="summary-row"><span class="summary-key">${k}</span><span class="summary-val">${v}</span></div>`).join('')}
       </div>`;
@@ -432,8 +412,15 @@ function render() {
   </div>`;
   document.getElementById('stepContent').innerHTML = content + nav;
 }
- 
+
 function exportCfg() {
+  if (S.configMode === 'file') {
+    fetch('/submit_file', { method: 'POST' })
+      .then(res => res.text())
+      .then(msg => alert(msg));
+    return;
+  }
+
   const cfg = {
     city_names: S.cityNames,
     use_geo: S.useGeo,

@@ -11,6 +11,7 @@ from classical.brute_force import solve as bf_solve
 from problems.routing import VehicleRoutingProblem
 from quantum.grover import solve as grover_solve, solve_iterative
 from quantum.noise import (
+    DEVICE_PRESETS,
     build_combined_model,
     build_depolarizing_model,
     build_ideal_model,
@@ -31,26 +32,49 @@ from geo.map_plotter import plot_route
 
 
 def _build_noise_model(cfg: dict):
-    """設定辞書に応じてノイズモデルを返す。"""
+    """設定辞書に応じてノイズモデルを返す。
+
+    ノイズモデルの区分:
+        ideal    : ノイズなし（理想シミュレーター）
+        depol    : 脱分極ノイズのみ
+        thermal  : 熱緩和ノイズのみ
+        readout  : 読み出しエラーのみ
+        combined : 上記3種を合わせた複合ノイズ
+    """
     mode = cfg["noise_model"]
+    device = cfg.get("device", "eagle_r3")
+    preset = DEVICE_PRESETS.get(device, DEVICE_PRESETS["eagle_r3"])
 
     if mode == "ideal":
         return build_ideal_model()
+
     if mode == "depol":
-        return build_depolarizing_model()
-    if mode == "thermal":
-        return build_thermal_model(gate_time_1q=cfg["gate_time_1q"])
-    if mode == "combined":
-        return build_combined_model(
-            device=cfg["device"],
-            gate_time_1q=cfg["gate_time_1q"],
+        return build_depolarizing_model(
+            depol_1q=preset["depol_1q"],
+            depol_2q=preset["depol_2q"],
         )
+
+    if mode == "thermal":
+        return build_thermal_model(
+            t1=preset["t1"],
+            t2=preset["t2"],
+            gate_time_1q=preset["gate_time_1q"],
+            gate_time_2q=preset["gate_time_2q"],
+            gate_time_measure=preset["gate_time_measure"],
+        )
+
     if mode == "readout":
-        return build_readout_model()
+        return build_readout_model(
+            p_meas1_prep0=preset["p_meas1_prep0"],
+            p_meas0_prep1=preset["p_meas0_prep1"],
+        )
+
+    if mode == "combined":
+        return build_combined_model(device=device)
 
     raise ValueError(
         f"不明なノイズモデル設定: {mode!r}。"
-        "'ideal' / 'depol' / 'thermal' / 'combined' / 'readout' のいずれかを指定してください。"
+        "'ideal' / 'depol' / 'thermal' / 'readout' / 'combined' のいずれかを指定してください。"
     )
 
 
