@@ -1,0 +1,456 @@
+"""対話形式でシミュレーションの設定を入力するモジュール。
+
+main.py から呼び出され、ユーザーの入力を受け取り
+config.py と同じ形式の設定辞書を返す。
+入力を省略した場合は config.py のデフォルト値を使用する。
+"""
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grover シミュレーター 設定UI</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #f9f9f9; display: flex; justify-content: center; padding: 2rem 1rem; }
+  .wrap { font-family: 'IBM Plex Sans JP', sans-serif; color: #1a1a1a; max-width: 640px; width: 100%; background: #fff; border-radius: 12px; border: 1px solid #e8e8e8; padding: 2rem 2.5rem 3rem; }
+  .progress-bar { display: flex; align-items: center; gap: 0; margin-bottom: 2.5rem; }
+  .prog-step { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; position: relative; }
+  .prog-step::after { content: ''; position: absolute; top: 14px; left: 50%; width: 100%; height: 1px; background: #e0e0e0; z-index: 0; }
+  .prog-step:last-child::after { display: none; }
+  .prog-circle { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #d0d0d0; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; color: #999; position: relative; z-index: 1; transition: all 0.2s; }
+  .prog-step.active .prog-circle { border-color: #2563eb; background: #2563eb; color: #fff; }
+  .prog-step.done .prog-circle { border-color: #16a34a; background: #16a34a; color: #fff; }
+  .prog-step.done::after { background: #16a34a; }
+  .prog-label { font-size: 11px; color: #aaa; white-space: nowrap; }
+  .prog-step.active .prog-label { color: #2563eb; font-weight: 500; }
+  .prog-step.done .prog-label { color: #16a34a; }
+  h2 { font-size: 18px; font-weight: 500; margin-bottom: 4px; color: #111; }
+  .step-desc { font-size: 13px; color: #666; margin-bottom: 1.75rem; line-height: 1.6; }
+  .section { margin-bottom: 1.75rem; }
+  .section-title { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: #999; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid #f0f0f0; }
+  .option-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 14px 16px; cursor: pointer; margin-bottom: 8px; display: flex; gap: 14px; align-items: flex-start; background: #fff; transition: border-color 0.15s, background 0.15s; }
+  .option-card:hover { border-color: #b0c4f5; background: #fafcff; }
+  .option-card.selected { border-color: #2563eb; background: #f0f5ff; }
+  .option-dot { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid #d0d0d0; background: #fff; flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .option-card.selected .option-dot { border-color: #2563eb; background: #2563eb; }
+  .option-dot-inner { width: 7px; height: 7px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity 0.15s; }
+  .option-card.selected .option-dot-inner { opacity: 1; }
+  .option-body { flex: 1; min-width: 0; }
+  .option-title { font-size: 14px; font-weight: 500; color: #111; margin-bottom: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .option-card.selected .option-title { color: #1d4ed8; }
+  .option-desc { font-size: 12px; color: #777; line-height: 1.55; }
+  .sample-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px 16px; cursor: pointer; margin-bottom: 8px; display: flex; gap: 12px; align-items: center; background: #fff; transition: border-color 0.15s, background 0.15s; }
+  .sample-card:hover { border-color: #b0c4f5; }
+  .sample-card.selected { border-color: #2563eb; background: #f0f5ff; }
+  .sample-num { width: 28px; height: 28px; border-radius: 6px; background: #f4f4f4; color: #888; font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+  .sample-card.selected .sample-num { background: #dbeafe; color: #1d4ed8; }
+  .sample-info .sample-name { font-size: 13px; font-weight: 500; color: #111; }
+  .sample-card.selected .sample-name { color: #1d4ed8; }
+  .sample-info .sample-cities { font-size: 12px; color: #888; margin-top: 2px; }
+  .field { margin-bottom: 14px; }
+  .field > label { display: block; font-size: 13px; font-weight: 500; color: #333; margin-bottom: 5px; }
+  .field .hint { font-size: 12px; color: #777; margin-top: 4px; line-height: 1.6; }
+  .field input[type=number], .field input[type=text] { width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; color: #111; background: #fff; outline: none; transition: border-color 0.15s; }
+  .field input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px #dbeafe; }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { padding: 6px 14px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 13px; color: #444; cursor: pointer; background: #fff; transition: all 0.15s; user-select: none; }
+  .chip:hover { border-color: #93b4f8; color: #1d4ed8; }
+  .chip.selected { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 500; }
+  .slider-row { display: flex; align-items: center; gap: 14px; }
+  .slider-row input[type=range] { flex: 1; accent-color: #2563eb; }
+  .slider-val { font-size: 15px; font-weight: 500; color: #111; min-width: 36px; text-align: right; }
+  .matrix-wrap { overflow-x: auto; }
+  .matrix-table { border-collapse: collapse; font-size: 13px; }
+  .matrix-table th { padding: 6px 10px; background: #f7f7f7; color: #777; font-weight: 500; border: 1px solid #eee; text-align: center; }
+  .matrix-table td { border: 1px solid #eee; padding: 3px 5px; }
+  .matrix-table input { width: 60px; padding: 5px 6px; border: none; background: transparent; font-size: 13px; color: #111; text-align: center; outline: none; }
+  .matrix-table input:focus { background: #f0f5ff; border-radius: 4px; }
+  .matrix-table td.diag { background: #f7f7f7; color: #ccc; text-align: center; }
+  .info-box { border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px 16px; background: #fafafa; font-size: 13px; color: #555; line-height: 1.65; margin-bottom: 14px; }
+  .info-box strong { color: #333; }
+  .alert-warn { border: 1px solid #fcd34d; border-radius: 8px; padding: 12px 16px; background: #fffbeb; font-size: 12px; color: #92400e; line-height: 1.6; display: flex; gap: 10px; align-items: flex-start; }
+  .alert-warn-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .alert-info { border: 1px solid #93c5fd; border-radius: 8px; padding: 12px 16px; background: #eff6ff; font-size: 12px; color: #1e40af; line-height: 1.6; display: flex; gap: 10px; align-items: flex-start; }
+  .alert-info-icon { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+  .summary-block { border: 1px solid #e8e8e8; border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
+  .summary-row { display: flex; justify-content: space-between; padding: 10px 16px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
+  .summary-row:last-child { border-bottom: none; }
+  .summary-row:nth-child(even) { background: #fafafa; }
+  .summary-key { color: #666; }
+  .summary-val { font-weight: 500; color: #111; }
+  .nav { display: flex; justify-content: space-between; align-items: center; padding-top: 1rem; border-top: 1px solid #f0f0f0; margin-top: 1rem; }
+  .btn-next { padding: 9px 22px; background: #2563eb; color: #fff; border: none; border-radius: 7px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn-next:hover { background: #1d4ed8; }
+  .btn-back { padding: 9px 18px; background: #fff; color: #555; border: 1px solid #ddd; border-radius: 7px; font-size: 14px; cursor: pointer; transition: background 0.15s; }
+  .btn-back:hover { background: #f5f5f5; }
+  .btn-export { padding: 9px 22px; background: #16a34a; color: #fff; border: none; border-radius: 7px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn-export:hover { background: #15803d; }
+  .tag-geo { display: inline-block; padding: 2px 8px; background: #dcfce7; color: #15803d; border-radius: 4px; font-size: 11px; font-weight: 500; margin-left: 8px; }
+  .tag-manual { display: inline-block; padding: 2px 8px; background: #fef9c3; color: #854d0e; border-radius: 4px; font-size: 11px; font-weight: 500; margin-left: 8px; }
+  .badge-new { display: inline-block; padding: 2px 8px; background: #dcfce7; color: #15803d; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .badge-warn { display: inline-block; padding: 2px 8px; background: #fef3c7; color: #92400e; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .device-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .device-card { border: 1px solid #e8e8e8; border-radius: 8px; padding: 12px 14px; cursor: pointer; background: #fff; transition: border-color 0.15s, background 0.15s; }
+  .device-card:hover { border-color: #b0c4f5; background: #fafcff; }
+  .device-card.selected { border-color: #2563eb; background: #f0f5ff; }
+  .device-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+  .device-dot { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #d0d0d0; background: #fff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .device-card.selected .device-dot { border-color: #2563eb; background: #2563eb; }
+  .device-dot-inner { width: 6px; height: 6px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity 0.15s; }
+  .device-card.selected .device-dot-inner { opacity: 1; }
+  .device-name { font-size: 13px; font-weight: 500; color: #111; }
+  .device-card.selected .device-name { color: #1d4ed8; }
+  .device-stats { font-size: 11px; color: #888; line-height: 1.7; }
+  .device-card.selected .device-stats { color: #3b82f6; }
+  code { font-family: monospace; font-size: 12px; background: #f4f4f4; padding: 1px 5px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="progress-bar" id="progBar"></div>
+  <div id="stepContent"></div>
+</div>
+<script>
+const STEPS = ['問題の種類', '都市設定', 'シミュレーション', '可視化', '確認'];
+const SAMPLES = {
+  '1': { label: '日本の主要都市', cities: ['東京', '大阪', '名古屋', '福岡'], useGeo: true },
+  '2': { label: 'ヨーロッパの主要都市', cities: ['London', 'Paris', 'Berlin', 'Rome'], useGeo: true },
+  '3': { label: 'シンプルなテスト問題', cities: ['A', 'B', 'C'], useGeo: false, matrix: [[0,10,25],[10,0,15],[25,15,0]] }
+};
+ 
+const DEVICES = {
+  'eagle_r3': {
+    label: 'Eagle r3',
+    t1: '269 µs', t2: '184 µs',
+    gt1q: '30 ns ⚠️', gt2q: '533 ns',
+    depol2q: '7.40e-3',
+    provisional: true,
+  },
+  'heron_r1': {
+    label: 'Heron r1',
+    t1: '176 µs', t2: '134 µs',
+    gt1q: '32 ns', gt2q: '68 ns',
+    depol2q: '2.50e-3',
+    provisional: false,
+  },
+  'heron_r2': {
+    label: 'Heron r2',
+    t1: '145 µs', t2: '99 µs',
+    gt1q: '24 ns', gt2q: '68 ns',
+    depol2q: '2.47e-3',
+    provisional: false,
+  },
+  'heron_r3': {
+    label: 'Heron r3',
+    t1: '293 µs', t2: '323 µs',
+    gt1q: '32 ns', gt2q: '78 ns',
+    depol2q: '1.31e-3',
+    provisional: false,
+  },
+};
+ 
+let S = {
+  step: 0, configMode: 'interactive', cityMode: 'sample', sampleId: '1',
+  cityCount: 4, cityNames: ['東京', '大阪', '名古屋', '福岡'], useGeo: true, distMatrix: [],
+  maxIter: 10, shots: 1024, ancilla: 'single', noise: 'ideal', device: 'eagle_r3', seed: 42, outputDir: 'output'
+};
+ 
+function chip(group, val, label, onchange) {
+  const sel = S[group] === val;
+  return `<div class="chip${sel?' selected':''}" onclick="S['${group}']='${val}';${onchange||''}render()">${label}</div>`;
+}
+ 
+function optCard(key, val, title, desc, onchange) {
+  const sel = S[key] === val;
+  return `<div class="option-card${sel?' selected':''}" onclick="S['${key}']=${typeof val==='boolean'?val:`'${val}'`};${onchange||''}render()">
+    <div class="option-dot"><div class="option-dot-inner"></div></div>
+    <div class="option-body">
+      <div class="option-title">${title}</div>
+      <div class="option-desc">${desc}</div>
+    </div>
+  </div>`;
+}
+ 
+function matrixHTML(names) {
+  const n = names.length;
+  let rows = `<thead><tr><th></th>${names.map(n=>`<th>${n}</th>`).join('')}</tr></thead><tbody>`;
+  for (let i=0;i<n;i++) {
+    rows += `<tr><th>${names[i]}</th>`;
+    for (let j=0;j<n;j++) {
+      if (i===j) { rows += `<td class="diag">0</td>`; continue; }
+      const def = S.distMatrix[i]?.[j] ?? (i+j+1)*5;
+      rows += `<td><input type="number" min="0" value="${def}" id="mx_${i}_${j}" oninput="syncMx()"></td>`;
+    }
+    rows += '</tr>';
+  }
+  return `<div class="matrix-wrap"><table class="matrix-table">${rows}</tbody></table></div>`;
+}
+ 
+function syncMx() {
+  const n = S.cityNames.length;
+  S.distMatrix = Array.from({length:n},(_,i)=>Array.from({length:n},(_,j)=>{
+    if(i===j)return 0;
+    const el=document.getElementById(`mx_${i}_${j}`);
+    return el?parseFloat(el.value)||0:0;
+  }));
+}
+ 
+function renderProg() {
+  document.getElementById('progBar').innerHTML = STEPS.map((label,i)=>`
+    <div class="prog-step ${i<S.step?'done':i===S.step?'active':''}">
+      <div class="prog-circle">${i<S.step?'&#10003;':i+1}</div>
+      <span class="prog-label">${label}</span>
+    </div>`).join('');
+}
+ 
+function deviceGrid() {
+  const showDevice = S.noise === 'thermal' || S.noise === 'combined';
+  if (!showDevice) return '';
+  const cards = Object.entries(DEVICES).map(([key, d]) => {
+    const sel = S.device === key;
+    return `<div class="device-card${sel?' selected':''}" onclick="S.device='${key}';render()">
+      <div class="device-card-header">
+        <div class="device-dot"><div class="device-dot-inner"></div></div>
+        <span class="device-name">${d.label}</span>
+        ${d.provisional ? `<span class="badge-warn">暫定値あり</span>` : ''}
+      </div>
+      <div class="device-stats">
+        T1 ${d.t1} / T2 ${d.t2}<br>
+        1Q ${d.gt1q} / 2Q gate ${d.gt2q}<br>
+        2Q error ${d.depol2q}
+      </div>
+    </div>`;
+  }).join('');
+  const provWarn = DEVICES[S.device] && DEVICES[S.device].provisional ? `
+    <div class="alert-warn" style="margin-top:10px;">
+      <span class="alert-warn-icon">&#9888;</span>
+      <div><strong>Eagle r3 の gate_time_1q は暫定値（30 ns）です。</strong><br>
+      ibm_sherbrooke は退役済みのため実測値が未取得です。<code>noise.py</code> の <code>IBM_EAGLE_R3["gate_time_1q"]</code> を確認してください。</div>
+    </div>` : '';
+  return `<div class="field">
+    <label>デバイスプリセット</label>
+    <div class="hint" style="margin-bottom:10px;">IBM Quantum の実機パラメータ（T1/T2・ゲート時間・読み出しエラー）を使ってノイズを模擬します。すべて IBM Quantum Platform のキャリブレーションデータより取得した全 qubit 中央値です。</div>
+    <div class="device-grid">${cards}</div>
+    ${provWarn}
+  </div>`;
+}
+ 
+const STEP_CONTENT = [
+  () => `
+    <h2>Grover シミュレーター</h2>
+    <p class="step-desc">設定の入力方法を選んでください。</p>
+    <div class="section">
+      ${optCard('configMode','interactive','ステップ形式で設定する','各パラメータをひとつずつ設定します。詳しい説明を確認しながら進められるので、はじめての方にもおすすめです。')}
+      ${optCard('configMode','file','config.py の設定をそのまま使う','設定ファイルの値をそのまま読み込んで実行します。すでに試した設定を再利用するときに便利です。')}
+    </div>`,
+ 
+  () => {
+    let extra = '';
+    if (S.cityMode === 'sample') {
+      extra = Object.entries(SAMPLES).map(([k,s])=>`
+        <div class="sample-card${S.sampleId===k?' selected':''}" onclick="S.sampleId='${k}';S.cityNames=[${s.cities.map(c=>`'${c}'`)}];S.useGeo=${s.useGeo};${s.matrix?`S.distMatrix=${JSON.stringify(s.matrix)};`:''}render()">
+          <div class="sample-num">${k}</div>
+          <div class="sample-info">
+            <div class="sample-name">${s.label}</div>
+            <div class="sample-cities">${s.cities.join(' · ')}</div>
+          </div>
+          ${s.useGeo?'<span class="tag-geo">座標自動取得</span>':'<span class="tag-manual">距離手動</span>'}
+        </div>`).join('');
+    } else if (S.cityMode === 'count') {
+      const names = Array.from({length: S.cityCount}, (_,i) => String.fromCharCode(65+i));
+      extra = `<div class="field">
+        <label>都市数</label>
+        <div class="hint">2〜8都市まで設定できます。都市名は A, B, C... と自動的に割り当てられます。</div>
+        <div style="margin-top:10px;">
+          <div class="slider-row">
+            <input type="range" min="2" max="8" value="${S.cityCount}" step="1"
+              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>String.fromCharCode(65+i));S.distMatrix=[];document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
+            <span class="slider-val" id="cntOut">${S.cityCount}</span>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>距離行列（km）</label>
+        <div class="hint">各都市間の距離を入力してください。対角成分（自分→自分）は 0 で固定です。</div>
+        <div style="margin-top:8px;" id="matrixArea">${matrixHTML(names)}</div>
+      </div>`;
+    } else {
+      extra = `<div class="field">
+        <label>都市名</label>
+        <div class="hint">カンマ区切りで2都市以上入力してください。例: 札幌, 仙台, 東京, 名古屋</div>
+        <input type="text" value="${S.cityNames.join(', ')}" oninput="S.cityNames=this.value.split(',').map(s=>s.trim()).filter(Boolean);render()">
+      </div>
+      <div class="field">
+        <label>距離の取得方法</label>
+        ${optCard('useGeo',true,'座標から自動取得（推奨）','地名をもとにインターネットから座標を取得し、実際の直線距離を計算します。インターネット接続が必要です。','render()')}
+        ${optCard('useGeo',false,'距離行列を手動で入力','都市間の距離を自分で入力します。インターネット不要で、独自の距離も設定できます。','render()')}
+      </div>
+      ${!S.useGeo?`<div class="field"><label>距離行列（km）</label><div class="hint">各都市間の距離を入力してください。</div><div style="margin-top:8px;">${matrixHTML(S.cityNames)}</div></div>`:''}`;
+    }
+    return `
+      <h2>都市の設定</h2>
+      <p class="step-desc">巡回セールスマン問題で使う都市を設定します。サンプルから選ぶか、自分で都市を指定できます。</p>
+      <div class="section">
+        <div class="section-title">入力方法</div>
+        <div class="chip-group">
+          ${chip('cityMode','sample','サンプルを選ぶ')}
+          ${chip('cityMode','count','都市数を指定')}
+          ${chip('cityMode','name','都市名を入力')}
+        </div>
+      </div>
+      <div class="section">${extra}</div>`;
+  },
+ 
+  () => {
+    const optimalNote = Math.round(Math.PI/4 * Math.sqrt(S.cityNames.length));
+    return `
+    <h2>シミュレーションの設定</h2>
+    <p class="step-desc">量子回路とノイズの挙動を設定します。はじめての方はデフォルト値のままで問題ありません。</p>
+    <div class="section">
+      <div class="section-title">アルゴリズム</div>
+      <div class="field">
+        <label>Durr-Hoyer 最大反復回数</label>
+        <div style="margin-top:10px;" class="slider-row">
+          <input type="range" min="1" max="50" value="${S.maxIter}" step="1"
+            oninput="S.maxIter=+this.value;document.getElementById('miOut').textContent=this.value">
+          <span class="slider-val" id="miOut">${S.maxIter}</span>
+        </div>
+        <div class="hint">Grover 探索の反復回数が最適値（現在の都市数では目安 <strong>${optimalNote} 回</strong>前後）を超えると、測定確率が下がって精度が落ちます。多ければよいわけではないので注意してください。Durr-Hoyer アルゴリズムは反復ごとにしきい値を更新するため、この値は探索の打ち切り上限として機能します。</div>
+      </div>
+      <div class="field">
+        <label>ショット数</label>
+        <div class="hint">量子回路を何回測定するかです。多いほど統計的なばらつきが減りますが、計算時間も増えます。</div>
+        <div style="margin-top:8px;" class="chip-group">
+          ${['256','512','1024','2048'].map(v=>chip('shots',+v,v)).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">量子回路</div>
+      <div class="field">
+        <label>Ancilla モード</label>
+        <div class="hint" style="margin-bottom:8px;">オラクル実装に使う補助量子ビットの構成です。</div>
+        ${optCard('ancilla','single','single','補助ビット1つの最小構成です。回路が小さくシミュレーションが速いので、まずここから始めるのがおすすめです。')}
+        ${optCard('ancilla','extra','extra','追加の補助ビットでオラクルを分解します。回路の深さが浅くなり、ノイズの影響を受けにくくなります。')}
+        ${optCard('ancilla','compare','compare','single と extra の両方を実行して結果を比較します。2つの構成の差を確認したいときに使います。')}
+      </div>
+      <div class="field">
+        <label>ノイズモデル</label>
+        <div class="hint" style="margin-bottom:8px;">現実の量子デバイスのノイズを模擬する方法を選びます。</div>
+        ${optCard('noise','ideal','ideal（ノイズなし）','理想的な量子コンピュータのシミュレーションです。アルゴリズムの動作確認やデバッグに最適です。','S.device="eagle_r3";')}
+        ${optCard('noise','depol','depolarizing（脱分極ノイズ）','各ゲート操作に一定確率でランダムなエラーを加えます。シンプルで扱いやすいノイズモデルです。','S.device="eagle_r3";')}
+        ${optCard('noise','thermal','thermal relaxation（熱緩和ノイズ）','実機の T1/T2 緩和時間をもとにノイズを模擬します。デバイスプリセットの選択が必要です。')}
+        ${optCard('noise','combined','combined（複合ノイズ）','脱分極ノイズと熱緩和ノイズを組み合わせた、最もリアルなモデルです。読み出しエラーも含まれます。')}
+        <div class="option-card${S.noise==='readout'?' selected':''}" onclick="S.noise='readout';render()">
+          <div class="option-dot"><div class="option-dot-inner"></div></div>
+          <div class="option-body">
+            <div class="option-title">readout（読み出しエラーのみ） <span class="badge-new">追加</span></div>
+            <div class="option-desc">測定時に発生する読み出しエラー（P(1|0)・P(0|1)）のみを模擬します。ゲートエラーの影響を切り離して測定精度だけを評価したいときに使います。</div>
+          </div>
+        </div>
+      </div>
+      ${deviceGrid()}
+      ${S.noise === 'readout' ? `
+      <div class="alert-info" style="margin-top:10px;">
+        <span class="alert-info-icon">&#9432;</span>
+        <div><strong>main.py への追記が必要です。</strong><br><code>_build_noise_model()</code> に <code>"readout"</code> の分岐を追加してください。<code>build_readout_model()</code> は <code>noise.py</code> に実装済みです。</div>
+      </div>` : ''}
+    </div>
+    <div class="section">
+      <div class="section-title">その他</div>
+      <div class="field" style="max-width:200px;">
+        <label>乱数シード</label>
+        <div class="hint">同じシードを使うと毎回同じ結果が得られます。再現性の確認に使えます。</div>
+        <input type="number" value="${S.seed}" oninput="S.seed=+this.value" style="margin-top:8px;">
+      </div>
+    </div>`;
+  },
+ 
+  () => `
+    <h2>可視化・出力の設定</h2>
+    <p class="step-desc">シミュレーション結果の GIF アニメーションをどこに保存するか設定します。</p>
+    <div class="section">
+      <div class="info-box">
+        <strong>出力されるファイルについて</strong><br>
+        実行すると以下のファイルが生成されます。<br><br>
+        <strong>grover_animation.gif</strong> — Grover 探索の反復ごとに確率分布が変化する様子。<br>
+        <strong>classical_vs_quantum.gif</strong> — 古典（全探索）と量子を並べた比較アニメーション。<br>
+        ${S.useGeo ? '<strong>route_map.png</strong> — 座標自動取得モードのみ。最適ルートを地図上に描画した画像。<br>' : ''}
+        <br>保存先を空欄にするとウィンドウ表示のみになります。
+      </div>
+      <div class="field">
+        <label>保存先ディレクトリ</label>
+        <div class="hint">相対パスまたは絶対パスで指定してください。存在しない場合は自動で作成されます。</div>
+        <input type="text" value="${S.outputDir}" oninput="S.outputDir=this.value" placeholder="例: output　または　/home/user/results" style="margin-top:8px;">
+      </div>
+    </div>`,
+ 
+  () => {
+    const rows = [
+      ['都市', S.cityNames.join(', ')],
+      ['距離設定', S.useGeo?'座標から自動取得':'手動入力'],
+      ['最大反復回数', S.maxIter + ' 回'],
+      ['ショット数', S.shots.toLocaleString()],
+      ['Ancilla モード', S.ancilla],
+      ['ノイズモデル', S.noise],
+      ...(['thermal','combined'].includes(S.noise) ? [['デバイス', DEVICES[S.device] ? DEVICES[S.device].label : S.device]] : []),
+      ['乱数シード', S.seed],
+      ['出力先', S.outputDir||'（ウィンドウ表示のみ）'],
+    ];
+    const showProvWarn = ['thermal','combined'].includes(S.noise) && DEVICES[S.device] && DEVICES[S.device].provisional;
+    return `
+      <h2>設定の確認</h2>
+      <p class="step-desc">入力した設定を確認してください。問題がなければ「コードを生成」をクリックしてください。</p>
+      ${showProvWarn ? `
+      <div class="alert-warn" style="margin-bottom:1rem;">
+        <span class="alert-warn-icon">&#9888;</span>
+        <div><strong>Eagle r3 の gate_time_1q は暫定値（30 ns）です。</strong><br>
+        ibm_sherbrooke が退役済みのため実測値が未取得です。結果の解釈には注意してください。</div>
+      </div>` : ''}
+      ${S.noise==='readout' ? `
+      <div class="alert-info" style="margin-bottom:1rem;">
+        <span class="alert-info-icon">&#9432;</span>
+        <div><strong>readout モードは main.py への追記が必要です。</strong></div>
+      </div>` : ''}
+      <div class="summary-block">
+        ${rows.map(([k,v])=>`<div class="summary-row"><span class="summary-key">${k}</span><span class="summary-val">${v}</span></div>`).join('')}
+      </div>`;
+  }
+];
+ 
+function render() {
+  renderProg();
+  const content = STEP_CONTENT[S.step]();
+  const isLast = S.step === STEPS.length - 1;
+  const nav = `<div class="nav">
+    ${S.step>0?`<button class="btn-back" onclick="S.step--;render()">戻る</button>`:'<div></div>'}
+    ${isLast
+      ? `<button class="btn-export" onclick="exportCfg()">コードを生成</button>`
+      : `<button class="btn-next" onclick="S.step++;render()">次へ</button>`}
+  </div>`;
+  document.getElementById('stepContent').innerHTML = content + nav;
+}
+ 
+function exportCfg() {
+  const cfg = {
+    city_names: S.cityNames, use_geo: S.useGeo,
+    distance_matrix: S.useGeo?[]:S.distMatrix,
+    max_iterations: S.maxIter, shots: S.shots,
+    ancilla_mode: S.ancilla, noise_model: S.noise,
+    device: S.device, seed: S.seed,
+    output_dir: S.outputDir||null
+  };
+  const pre = document.getElementById('exportResult') || document.createElement('pre');
+  pre.id = 'exportResult';
+  pre.style.cssText = 'background:#f4f4f4;border-radius:8px;padding:1rem;font-size:12px;margin-top:1rem;overflow-x:auto;font-family:monospace;line-height:1.6;';
+  pre.textContent = 'CONFIG = ' + JSON.stringify(cfg, null, 2);
+  document.getElementById('stepContent').appendChild(pre);
+}
+ 
+render();
+</script>
+</body>
+</html>

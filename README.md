@@ -1,8 +1,5 @@
 <img src= https://img.shields.io/github/directory-file-count/Kojki/quantum-learning/README.md>
 
-
-""""""""" 作成途中です！！完成しているように見えるものでも完成していません。（暫定値を置いたりしています）ご了承ください！！ """"""""""
-
 <div align="center">
 
 # Integrated Quantum Simulation Portfolio

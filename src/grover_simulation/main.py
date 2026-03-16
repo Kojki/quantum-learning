@@ -14,6 +14,7 @@ from quantum.noise import (
     build_depolarizing_model,
     build_ideal_model,
     build_thermal_model,
+    build_readout_model,
 )
 from benchmark.metrics import compare
 from visualizer.animation import run as run_animation
@@ -43,10 +44,12 @@ def _build_noise_model(cfg: dict):
             device=cfg["device"],
             gate_time_1q=cfg["gate_time_1q"],
         )
+    if mode == "readout":
+        return build_readout_model()
 
     raise ValueError(
         f"不明なノイズモデル設定: {mode!r}。"
-        "'ideal' / 'depol' / 'thermal' / 'combined' のいずれかを指定してください。"
+        "'ideal' / 'depol' / 'thermal' / 'combined' / 'readout' のいずれかを指定してください。"
     )
 
 
@@ -73,11 +76,9 @@ def _print_result(label: str, result: dict, top_k: int = 5) -> None:
     print(f"  最小コスト       : {result['best_cost']}")
     print(f"  実行時間         : {result['elapsed_sec']:.4f} 秒")
 
-    # 古典固有
     if "n_evaluated" in result:
         print(f"  評価した解の数   : {result['n_evaluated']} / {result['n_total']}")
 
-    # Durr-Hoyer 固有
     if "n_grover_calls" in result:
         print(f"  Grover 実行回数  : {result['n_grover_calls']}")
         if "history" in result:
@@ -90,7 +91,6 @@ def _print_result(label: str, result: dict, top_k: int = 5) -> None:
                     f"ルート: {entry['route']}"
                 )
 
-    # 量子固有
     if "n_iterations" in result:
         print(f"  Grover 反復回数  : {result['n_iterations']}")
         print(f"  回路深さ         : {result['circuit_depth']}")
@@ -123,24 +123,18 @@ def _print_result(label: str, result: dict, top_k: int = 5) -> None:
 
 
 def main() -> None:
-    # --- 設定の読み込み ---
     cfg = select_config_mode()
 
-    # --- 乱数シード固定 ---
     random.seed(cfg["seed"])
     np.random.seed(cfg["seed"])
 
-    # --- 地名モードの場合：座標取得と距離行列の自動生成 ---
     coords = None
     if cfg["use_geo"]:
         print("\n座標を取得中...")
         coords = geocode_cities(cfg["city_names"])
-
-        # 取得できた都市だけで続行
         cfg["city_names"] = list(coords.keys())
         cfg["distance_matrix"], cfg["city_names"] = build_distance_matrix(coords)
 
-    # --- 問題のセットアップ ---
     problem = VehicleRoutingProblem(
         distance_matrix=cfg["distance_matrix"],
         city_names=cfg["city_names"],
@@ -149,11 +143,9 @@ def main() -> None:
     print(problem.describe())
     print(f"\nノイズモデル     : {cfg['noise_model']}")
 
-    # --- 古典：全探索 ---
     bf_result = bf_solve(problem)
     _print_result("古典（全探索）", bf_result)
 
-    # --- 量子：Durr-Hoyer アルゴリズム ---
     noise_model = _build_noise_model(cfg)
     print("\nDurr-Hoyer アルゴリズムで探索中...")
     grover_result = solve_iterative(
@@ -168,7 +160,6 @@ def main() -> None:
     )
     _print_result(f"量子（Durr-Hoyer / {cfg['noise_model']}）", grover_result)
 
-    # --- ベンチマーク比較 ---
     if bf_result.get("status") == "ok" and grover_result.get("status") == "ok":
         report = compare(
             bf_result=bf_result,
@@ -177,17 +168,14 @@ def main() -> None:
         )
         print(f"\n{report['summary']}")
 
-    # --- 可視化 ---
     output_dir = Path(cfg["output_dir"]) if cfg["output_dir"] else None
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Grover が解を見つけられなかった場合は可視化をスキップ
     if grover_result.get("status") != "ok":
         print("\n⚠️  Grover が解を見つけられなかったため、可視化をスキップします。")
         return
 
-    # 地図上にルートを描画（地名モードのみ）
     if coords is not None:
         print("\n最適ルートを地図上に描画中...")
         plot_route(
