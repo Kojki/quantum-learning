@@ -1,0 +1,37 @@
+[
+  {
+    "noise_model": "ideal",
+    "best_cost": 941.0,
+    "optimal": true,
+    "elapsed_sec": 1.9130819999991218,
+    "n_grover_calls": 2
+  },
+  {
+    "noise_model": "depol",
+    "best_cost": 941.0,
+    "optimal": true,
+    "elapsed_sec": 4.452242500003194,
+    "n_grover_calls": 2
+  },
+  {
+    "noise_model": "thermal",
+    "best_cost": 941.0,
+    "optimal": true,
+    "elapsed_sec": 0.7216420000040671,
+    "n_grover_calls": 2
+  },
+  {
+    "noise_model": "readout",
+    "best_cost": 941.0,
+    "optimal": true,
+    "elapsed_sec": 0.4029646000053617,
+    "n_grover_calls": 2
+  },
+  {
+    "noise_model": "combined",
+    "best_cost": 941.0,
+    "optimal": true,
+    "elapsed_sec": 0.775067399998079,
+    "n_grover_calls": 2
+  }
+]

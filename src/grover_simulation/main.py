@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from web_app import get_config_from_web
 
+import base64
 import json
 import math
 import random
@@ -56,7 +57,7 @@ from visualizer.animation import run as run_animation
 from visualizer.state_plotter import run as run_race
 from geo.geocoder import geocode_cities
 from geo.distance import build_distance_matrix
-from geo.map_plotter import plot_route
+from geo.map_plotter import plot_route, plot_route_from_matrix
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +287,7 @@ def _plot_noise_comparison(
     # 棒グラフ（コスト）
     bars = ax1.bar(labels, costs, color=colors, alpha=0.75, width=0.5, label="Min Cost")
 
-    # 最適解マーク（絵文字非対応環境のため ★ で代替）
+    # 最適解マーク
     for bar, ok in zip(bars, optimals):
         mark = "✓" if ok else "✗"
         color = "#16a34a" if ok else "#dc2626"
@@ -435,6 +436,236 @@ def _plot_success_rate_comparison(
 
 
 # ---------------------------------------------------------------------------
+# HTMLレポート生成
+# ---------------------------------------------------------------------------
+
+
+def _img_to_base64(path) -> str | None:
+    """画像ファイルを Base64 文字列に変換する。"""
+    if path is None or not path.exists():
+        return None
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+
+def _generate_html_report(
+    cfg, bf_result, grover_result, comparison_rows, output_dir
+) -> None:
+    """実行結果をまとめた HTML レポートを生成する。グラフ画像は Base64 で埋め込む。"""
+    if output_dir is None:
+        return
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    mode = "all" if comparison_rows is not None else cfg.get("noise_model", "unknown")
+
+    def img_tag(filename, alt, width="100%"):
+        b64 = _img_to_base64(output_dir / filename)
+        if b64 is None:
+            return f'<p style="color:#888;">({alt} not generated)</p>'
+        return f'<img src="data:image/png;base64,{b64}" alt="{alt}" style="width:{width};border-radius:8px;border:1px solid #e0e0e0;">'
+
+    def matrix_table():
+        dm = cfg.get("distance_matrix", [])
+        names = cfg.get("city_names", [])
+        if not dm or not names:
+            return "<p>N/A</p>"
+        rows = "<tr><th></th>" + "".join(f"<th>{n}</th>" for n in names) + "</tr>"
+        for i, row in enumerate(dm):
+            cells = "".join(
+                (
+                    '<td style="background:#f7f7f7;color:#aaa;">0</td>'
+                    if i == j
+                    else f"<td>{v:.1f}</td>"
+                )
+                for j, v in enumerate(row)
+            )
+            rows += f"<tr><th>{names[i]}</th>{cells}</tr>"
+        return f'<table class="matrix">{rows}</table>'
+
+    def history_table(result):
+        history = result.get("history", [])
+        if not history:
+            return "<p>No history</p>"
+        rows = "<tr><th>Iter</th><th>Cost</th><th>Route</th><th>Improved</th></tr>"
+        for h in history:
+            mark = "★" if h.get("improved") else "—"
+            color = "#16a34a" if h.get("improved") else "#888"
+            rows += (
+                f"<tr><td>{h['iteration']}</td><td>{h['threshold']:.1f}</td>"
+                f"<td>{h.get('route','—')}</td>"
+                f'<td style="color:{color};font-weight:bold;">{mark}</td></tr>'
+            )
+        return f'<table class="data">{rows}</table>'
+
+    def comparison_table(rows):
+        header = "<tr><th>Noise Model</th><th>Best Cost</th><th>Optimal</th><th>Time (s)</th><th>Grover Calls</th></tr>"
+        body = ""
+        for r in rows:
+            cost = f"{r['best_cost']:.1f}" if r["best_cost"] is not None else "—"
+            opt = (
+                '<span style="color:#16a34a;font-weight:bold;">★ YES</span>'
+                if r["optimal"]
+                else '<span style="color:#dc2626;">✗ NO</span>'
+            )
+            t = f"{r['elapsed_sec']:.3f}" if r["elapsed_sec"] is not None else "—"
+            calls = str(r["n_grover_calls"]) if r["n_grover_calls"] is not None else "—"
+            body += f'<tr><td><code>{r["noise_model"]}</code></td><td>{cost}</td><td>{opt}</td><td>{t}</td><td>{calls}</td></tr>'
+        return f'<table class="data">{header}{body}</table>'
+
+    bf_ok = bf_result.get("status") == "ok"
+    bf_cost = bf_result.get("best_cost", 0) if bf_ok else 0
+    bf_route = bf_result.get("best_route", "—") if bf_ok else "—"
+    bf_time = f"{bf_result.get('elapsed_sec', 0):.4f} s" if bf_ok else "—"
+    bf_eval = (
+        f"{bf_result.get('n_evaluated',0):,} / {bf_result.get('n_total',0):,}"
+        if bf_ok
+        else "—"
+    )
+    n_cities = len(cfg.get("city_names", []))
+    n_routes = 1
+    for i in range(2, n_cities):
+        n_routes *= i
+
+    # 通常モードの量子結果セクション
+    quantum_section = ""
+    if grover_result and grover_result.get("status") == "ok":
+        q_cost = grover_result.get("best_cost", 0)
+        q_route = grover_result.get("best_route", "—")
+        q_time = f"{grover_result.get('elapsed_sec', 0):.4f} s"
+        q_calls = grover_result.get("n_grover_calls", "—")
+        match = abs(q_cost - bf_cost) < 1e-6 if bf_ok else False
+        match_b = (
+            '<span class="badge ok">★ Optimal Match</span>'
+            if match
+            else '<span class="badge ng">✗ No Match</span>'
+        )
+        quantum_section = (
+            f'<section><h2>Quantum Result (Durr-Hoyer / {cfg.get("noise_model","—")})</h2>'
+            f'<div class="kv-grid">'
+            f'<div class="kv"><span>Best Route</span><strong>{q_route}</strong></div>'
+            f'<div class="kv"><span>Min Cost</span><strong>{q_cost:.1f}</strong></div>'
+            f'<div class="kv"><span>Elapsed</span><strong>{q_time}</strong></div>'
+            f'<div class="kv"><span>Grover Calls</span><strong>{q_calls}</strong></div>'
+            f'<div class="kv"><span>Match Classical</span><strong>{match_b}</strong></div>'
+            f"</div><h3>Search History</h3>{history_table(grover_result)}</section>"
+            f'<section><h2>Success Rate</h2>{img_tag("success_rate.png","Success Rate Graph","80%")}</section>'
+        )
+
+    # 比較モードのセクション
+    comparison_section = ""
+    if comparison_rows:
+        comparison_section = (
+            f"<section><h2>Noise Model Comparison</h2>{comparison_table(comparison_rows)}"
+            f'<h3>Cost &amp; Time</h3>{img_tag("noise_comparison.png","Noise Comparison")}'
+            f'<h3>Success Rate by Noise Model</h3>{img_tag("success_rate_comparison.png","Success Rate Comparison")}</section>'
+        )
+
+    mds_note = (
+        '<p style="font-size:0.8rem;color:#888;margin-top:0.5rem;">* Layout approximated from distance matrix (MDS).</p>'
+        if not cfg.get("use_geo")
+        else ""
+    )
+
+    css = """
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f4f6f9; color: #1a1a2e; padding: 2rem; }
+    .container { max-width: 960px; margin: 0 auto; }
+    header { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: white; border-radius: 12px; padding: 2rem; margin-bottom: 2rem; }
+    header h1 { font-size: 1.6rem; margin-bottom: 0.4rem; }
+    header p  { font-size: 0.9rem; opacity: 0.85; }
+    section { background: white; border-radius: 12px; padding: 1.5rem 2rem; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    h2 { font-size: 1.1rem; font-weight: 600; color: #1e3a8a; border-bottom: 2px solid #dbeafe; padding-bottom: 0.5rem; margin-bottom: 1rem; }
+    h3 { font-size: 0.95rem; font-weight: 600; color: #374151; margin: 1.2rem 0 0.6rem; }
+    .kv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; }
+    .kv { background: #f8fafc; border-radius: 8px; padding: 0.75rem 1rem; }
+    .kv span { display: block; font-size: 0.75rem; color: #6b7280; margin-bottom: 0.25rem; }
+    .kv strong { font-size: 0.95rem; color: #1a1a2e; word-break: break-all; }
+    table.data { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    table.data th { background: #f1f5f9; padding: 0.5rem 0.75rem; text-align: left; font-weight: 600; }
+    table.data td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #f1f5f9; }
+    table.data tr:last-child td { border-bottom: none; }
+    table.matrix { border-collapse: collapse; font-size: 0.8rem; }
+    table.matrix th, table.matrix td { border: 1px solid #e5e7eb; padding: 4px 8px; text-align: center; }
+    table.matrix th { background: #f8fafc; font-weight: 600; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+    .badge.ok { background: #dcfce7; color: #15803d; }
+    .badge.ng { background: #fee2e2; color: #dc2626; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    """
+
+    cities_str = ", ".join(cfg.get("city_names", []))
+    gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    device_str = cfg.get("device", "—")
+    dist_str = "Geocoded" if cfg.get("use_geo") else "Manual"
+    shots_str = str(cfg.get("shots", "—"))
+    max_it_str = str(cfg.get("max_iterations", "—"))
+    anc_str = cfg.get("ancilla_mode", "—")
+    seed_str = str(cfg.get("seed", "—"))
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grover Simulation Report</title>
+<style>{css}</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Grover Simulation Report</h1>
+    <p>Generated: {gen_time} | Mode: {mode} | Device: {device_str}</p>
+  </header>
+  <section>
+    <h2>Problem Overview</h2>
+    <div class="kv-grid">
+      <div class="kv"><span>Cities</span><strong>{cities_str}</strong></div>
+      <div class="kv"><span>City Count</span><strong>{n_cities}</strong></div>
+      <div class="kv"><span>Valid Routes (n-1)!</span><strong>{n_routes:,}</strong></div>
+      <div class="kv"><span>Shots</span><strong>{shots_str}</strong></div>
+      <div class="kv"><span>Max Iterations</span><strong>{max_it_str}</strong></div>
+      <div class="kv"><span>Ancilla Mode</span><strong>{anc_str}</strong></div>
+      <div class="kv"><span>Seed</span><strong>{seed_str}</strong></div>
+      <div class="kv"><span>Distance Input</span><strong>{dist_str}</strong></div>
+    </div>
+    <h3>Distance Matrix (km)</h3>
+    {matrix_table()}
+  </section>
+  <section>
+    <h2>Classical Result (Brute Force)</h2>
+    <div class="kv-grid">
+      <div class="kv"><span>Best Route</span><strong>{bf_route}</strong></div>
+      <div class="kv"><span>Min Cost</span><strong>{bf_cost:.1f}</strong></div>
+      <div class="kv"><span>Elapsed</span><strong>{bf_time}</strong></div>
+      <div class="kv"><span>Routes Evaluated</span><strong>{bf_eval}</strong></div>
+    </div>
+  </section>
+  {quantum_section}
+  {comparison_section}
+  <section>
+    <h2>Route Map</h2>
+    {img_tag("route_map.png", "Route Map")}
+    {mds_note}
+  </section>
+  <section>
+    <h2>Animations</h2>
+    <div class="two-col">
+      <div><h3>Grover Probability</h3><p style="font-size:0.85rem;color:#555;">grover_animation.gif</p></div>
+      <div><h3>Classical vs Quantum</h3><p style="font-size:0.85rem;color:#555;">classical_vs_quantum.gif</p></div>
+    </div>
+  </section>
+</div>
+</body>
+</html>"""
+
+    report_path = output_dir / f"report_{timestamp}.html"
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"  HTMLレポートを保存しました: {report_path.name}")
+
+
+# ---------------------------------------------------------------------------
 # ノイズモデル一括比較
 # ---------------------------------------------------------------------------
 
@@ -534,6 +765,8 @@ def _run_noise_comparison(
     except Exception as e:
         print(f"  ⚠️  成功率比較グラフの生成に失敗しました: {e}")
 
+    return comparison_rows
+
 
 # ---------------------------------------------------------------------------
 # メイン
@@ -615,7 +848,38 @@ def main() -> None:
 
     # ── ノイズモデル一括比較モード ──
     if cfg["noise_model"] == "all":
-        _run_noise_comparison(problem, cfg, bf_result, output_dir)
+        comparison_rows = _run_noise_comparison(problem, cfg, bf_result, output_dir)
+
+        # 古典の最適ルートで地図を生成
+        if bf_result.get("status") == "ok":
+            print("\nルートマップを生成中...")
+            try:
+                if coords is not None:
+                    plot_route(
+                        coords=coords,
+                        best_route=bf_result["best_route"],
+                        title="Classical Optimal Route",
+                        save_path=output_dir / "route_map.png" if output_dir else None,
+                    )
+                else:
+                    plot_route_from_matrix(
+                        distance_matrix=cfg["distance_matrix"],
+                        city_names=cfg["city_names"],
+                        best_route=bf_result["best_route"],
+                        title="Classical Optimal Route — Approx. Layout",
+                        save_path=output_dir / "route_map.png" if output_dir else None,
+                    )
+            except Exception as e:
+                print(f"  ⚠️  地図描画に失敗しました: {e}")
+
+        # HTMLレポート生成
+        if output_dir:
+            print("\nHTMLレポートを生成中...")
+            try:
+                _generate_html_report(cfg, bf_result, None, comparison_rows, output_dir)
+            except Exception as e:
+                print(f"  ⚠️  レポート生成に失敗しました: {e}")
+
         print("\nすべての出力が完了しました。")
         if output_dir:
             print(f"保存先: {output_dir.resolve()}")
@@ -658,17 +922,27 @@ def main() -> None:
         print("\n⚠️  Grover が解を見つけられなかったため、可視化をスキップします。")
         return
 
-    if coords is not None:
-        print("\n最適ルートを地図上に描画中...")
-        try:
+    print("\nルートマップを生成中...")
+    try:
+        if coords is not None:
+            # use_geo=True: 実座標 + OpenStreetMap 背景
             plot_route(
                 coords=coords,
                 best_route=grover_result["best_route"],
-                title=f"Grover が見つけた最短ルート（{cfg['noise_model']}）",
+                title=f"Grover Optimal Route ({cfg['noise_model']})",
                 save_path=output_dir / "route_map.png" if output_dir else None,
             )
-        except Exception as e:
-            print(f"  ⚠️  地図描画に失敗しました: {e}")
+        else:
+            # use_geo=False: 距離行列からMDSで近似座標を生成
+            plot_route_from_matrix(
+                distance_matrix=cfg["distance_matrix"],
+                city_names=cfg["city_names"],
+                best_route=grover_result["best_route"],
+                title=f"Grover Optimal Route ({cfg['noise_model']}) — Approx. Layout",
+                save_path=output_dir / "route_map.png" if output_dir else None,
+            )
+    except Exception as e:
+        print(f"  ⚠️  地図描画に失敗しました: {e}")
 
     print("\n成功率グラフを生成中...")
     try:
@@ -712,6 +986,14 @@ def main() -> None:
         )
     except Exception as e:
         print(f"  ⚠️  比較アニメーション生成に失敗しました: {e}")
+
+    # HTMLレポート生成
+    if output_dir:
+        print("\nHTMLレポートを生成中...")
+        try:
+            _generate_html_report(cfg, bf_result, grover_result, None, output_dir)
+        except Exception as e:
+            print(f"  ⚠️  レポート生成に失敗しました: {e}")
 
     print("\nすべての出力が完了しました。")
     if output_dir:
