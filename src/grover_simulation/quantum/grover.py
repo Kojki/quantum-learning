@@ -34,7 +34,6 @@ def build_diffusion(n_qubits: int) -> Gate:
     circuit.h(range(n_qubits))
     circuit.x(range(n_qubits))
 
-    # 最後の qubit を標的にした multi-controlled Z（H で挟んで CX → CZ に変換）
     circuit.h(n_qubits - 1)
     circuit.mcx(list(range(n_qubits - 1)), n_qubits - 1)
     circuit.h(n_qubits - 1)
@@ -56,8 +55,6 @@ def optimal_iterations(n_qubits: int, n_targets: int) -> int:
     最適回数 = round( π/4 × √(N/M) )
         N = 2^n_qubits（探索空間のサイズ）
         M = n_targets（正解の数）
-
-    ターゲットが 0 件または探索空間以上の場合は 1 を返す（安全策）。
     """
     n_space = 2**n_qubits
     if n_targets <= 0 or n_targets >= n_space:
@@ -75,37 +72,14 @@ def build_grover_circuit(
     oracle: Gate,
     n_iterations: int,
 ) -> QuantumCircuit:
-    """Oracle と Diffusion を組み合わせた Grover 回路を構築する。
-
-    量子ビット構成:
-        q[0..n_qubits-1] : 入力レジスタ
-        q[n_qubits]      : ancilla（oracle が使用）
-
-    Args:
-        n_qubits: 入力レジスタのビット数
-        oracle: build_oracle() が返すゲート（n_qubits + 1 本）
-        n_iterations: Grover 反復回数
-
-    Returns:
-        測定込みの QuantumCircuit
-    """
-    # ancilla 込みで初期化
+    """Oracle と Diffusion を組み合わせた Grover 回路を構築する。"""
     circuit = QuantumCircuit(n_qubits + 1, n_qubits)
-
-    # 入力レジスタを均一重ね合わせ状態に
     circuit.h(range(n_qubits))
-
     diffusion = build_diffusion(n_qubits)
-
     for _ in range(n_iterations):
-        # Oracle：入力レジスタ + ancilla
         circuit.append(oracle, list(range(n_qubits + 1)))
-        # Diffusion：入力レジスタのみ
         circuit.append(diffusion, list(range(n_qubits)))
-
-    # 入力レジスタのみ測定
     circuit.measure(range(n_qubits), range(n_qubits))
-
     return circuit
 
 
@@ -119,50 +93,19 @@ def build_grover_circuit_extra_ancilla(
     oracle: Gate,
     n_iterations: int,
 ) -> QuantumCircuit:
-    """追加 ancilla を使って mcx を分解した、回路深さの浅い Grover 回路を構築する。
-
-    通常の mcx（multi-controlled X）は制御 qubit が増えると回路が深くなる。
-    追加の ancilla を「作業台」として使うことで、大きな mcx を
-    小さな Toffoli（CCX）ゲートの連鎖に分解できる。
-
-    追加 ancilla の数 = max(0, n_qubits - 2)
-        制御 qubit が 2 本以下なら追加不要（CCX で直接表現できるため）
-
-    量子ビット構成:
-        q[0..n_qubits-1]                     : 入力レジスタ
-        q[n_qubits]                           : oracle 用 ancilla（位相キックバック）
-        q[n_qubits+1 .. n_qubits+n_extra]     : mcx 分解用 ancilla
-
-    Args:
-        n_qubits: 入力レジスタのビット数
-        oracle: build_oracle() が返すゲート（n_qubits + 1 本）
-        n_iterations: Grover 反復回数
-
-    Returns:
-        測定込みの QuantumCircuit
-    """
+    """追加 ancilla を使って mcx を分解した、回路深さの浅い Grover 回路を構築する。"""
     n_extra = max(0, n_qubits - 2)
-    n_total = n_qubits + 1 + n_extra  # 入力 + oracle ancilla + extra ancilla
-
+    n_total = n_qubits + 1 + n_extra
     circuit = QuantumCircuit(n_total, n_qubits)
-
-    # 入力レジスタを均一重ね合わせ状態に
     circuit.h(range(n_qubits))
-
     diffusion = build_diffusion(n_qubits)
-
     for _ in range(n_iterations):
-        # Oracle は入力レジスタ + oracle ancilla のみ使用
         circuit.append(oracle, list(range(n_qubits + 1)))
-
-        # Diffusion 内の mcx を extra ancilla を使って分解
-        # Qiskit の mcx は ancilla_qubits 引数で追加 ancilla を受け取れる
         if n_extra > 0:
             extra_qubits = list(range(n_qubits + 1, n_total))
             _append_diffusion_with_ancilla(circuit, n_qubits, extra_qubits)
         else:
             circuit.append(diffusion, list(range(n_qubits)))
-
     circuit.measure(range(n_qubits), range(n_qubits))
     return circuit
 
@@ -172,16 +115,9 @@ def _append_diffusion_with_ancilla(
     n_qubits: int,
     extra_qubits: list[int],
 ) -> None:
-    """extra ancilla を使って Diffusion を回路に直接追記する。
-
-    build_diffusion と同じ構造だが、mcx に ancilla_qubits を渡して
-    ゲートを浅く分解する。ゲート化せず直接 append することで
-    Qiskit の transpile が ancilla を認識できるようにしている。
-    """
     qubits = list(range(n_qubits))
     target = n_qubits - 1
     controls = list(range(n_qubits - 1))
-
     circuit.h(qubits)
     circuit.x(qubits)
     circuit.h(target)
@@ -192,7 +128,47 @@ def _append_diffusion_with_ancilla(
 
 
 # ---------------------------------------------------------------------------
-# 5. エントリーポイント
+# 5. シミュレーション実行（中断対応）
+# ---------------------------------------------------------------------------
+
+
+def _run_circuit(
+    circuit: QuantumCircuit,
+    shots: int,
+    noise_model=None,
+    seed: int | None = None,
+) -> dict[str, int]:
+    """回路を実行して測定カウントを返す。
+
+    Ctrl+C（KeyboardInterrupt）を受け取ったとき job をキャンセルして
+    InterruptedError を送出する。これにより呼び出し元が中断を検知できる。
+    """
+    simulator = AerSimulator()
+    options: dict = {"shots": shots}
+    if noise_model is not None:
+        options["noise_model"] = noise_model
+    if seed is not None:
+        options["seed_simulator"] = seed
+
+    compiled = transpile(circuit, simulator)
+    job = simulator.run(compiled, **options)
+
+    try:
+        counts = job.result().get_counts()
+    except KeyboardInterrupt:
+        job.cancel()
+        raise InterruptedError("シミュレーションが中断されました（Ctrl+C）。")
+
+    # リトルエンディアン → ビッグエンディアン
+    normalized: dict[str, int] = {}
+    for bitstring, count in counts.items():
+        key = bitstring.replace(" ", "")[::-1]
+        normalized[key] = normalized.get(key, 0) + count
+    return normalized
+
+
+# ---------------------------------------------------------------------------
+# 6. エントリーポイント（単発 Grover）
 # ---------------------------------------------------------------------------
 
 
@@ -201,32 +177,24 @@ def solve(
     shots: int = 1024,
     condition: Callable[[str], bool] | None = None,
     threshold: float | None = None,
+    n_iterations: int | None = None,
     top_k: int = 5,
-    noise_model=None,
     ancilla_mode: str = "single",
+    noise_model=None,
+    seed: int | None = None,
 ) -> dict:
-    """Grover のアルゴリズムで最適解を探索する。
-
-    brute_force.solve() と同じ dict 形式で返すことで
-    benchmark/runner.py での比較を容易にする。
+    """Grover のアルゴリズムで最適解を探索する（単発）。
 
     Args:
         problem: OptimizationProblem のインスタンス
         shots: シミュレーションのショット数
         condition: 外部から渡す condition（省略時は threshold から自動生成）
         threshold: condition 省略時に使うコストしきい値
+        n_iterations: 反復回数（省略時は自動計算）
         top_k: 返り値 top_k リストの件数
-        ancilla_mode: ancilla の使い方を指定する
-            'single'  → oracle 用 ancilla 1本のみ（デフォルト・シンプル）
-            'extra'   → 追加 ancilla で mcx を分解（回路が浅くなる・実機向き）
-            'compare' → single と extra の両方を実行して回路深さを比較
-
-    Returns:
-        dict。ancilla_mode='compare' のときは 'ancilla_comparison' キーが追加される。
-
-    Raises:
-        ValueError: condition も threshold も指定されていない場合
-        ValueError: ancilla_mode が不正な値の場合
+        ancilla_mode: 'single' | 'extra' | 'compare'
+        noise_model: Qiskit Aer のノイズモデル（省略時はノイズなし）
+        seed: 乱数シード
     """
     if ancilla_mode not in ("single", "extra", "compare"):
         raise ValueError(
@@ -236,7 +204,6 @@ def solve(
     start = time.perf_counter()
     n_qubits = problem.n_qubits_required()
 
-    # --- condition の決定 ---
     if condition is None:
         if threshold is None:
             raise ValueError("condition か threshold のどちらかを指定してください。")
@@ -246,19 +213,22 @@ def solve(
             feasibility_fn=problem.is_feasible,
         )
 
-    # --- Oracle 構築 ---
     try:
         oracle = build_oracle(n_qubits, condition, verbose=False)
     except ValueError as e:
-        elapsed = time.perf_counter() - start
-        return {"status": "no_solution", "error": str(e), "elapsed_sec": elapsed}
+        return {
+            "status": "no_solution",
+            "error": str(e),
+            "elapsed_sec": time.perf_counter() - start,
+        }
 
     from quantum.oracle import _enumerate_targets
 
     n_targets = len(_enumerate_targets(n_qubits, condition))
-    n_iterations = optimal_iterations(n_qubits, n_targets)
 
-    # --- 回路構築（モードに応じて分岐）---
+    if n_iterations is None:
+        n_iterations = optimal_iterations(n_qubits, n_targets)
+
     if ancilla_mode == "single":
         circuit = build_grover_circuit(n_qubits, oracle, n_iterations)
         ancilla_info = {
@@ -266,7 +236,6 @@ def solve(
             "n_ancilla": 1,
             "n_qubits_total": n_qubits + 1,
         }
-
     elif ancilla_mode == "extra":
         circuit = build_grover_circuit_extra_ancilla(n_qubits, oracle, n_iterations)
         n_extra = max(0, n_qubits - 2)
@@ -275,8 +244,7 @@ def solve(
             "n_ancilla": 1 + n_extra,
             "n_qubits_total": n_qubits + 1 + n_extra,
         }
-
-    else:  # 'compare'
+    else:  # compare
         circuit_s = build_grover_circuit(n_qubits, oracle, n_iterations)
         circuit_e = build_grover_circuit_extra_ancilla(n_qubits, oracle, n_iterations)
         n_extra = max(0, n_qubits - 2)
@@ -295,26 +263,22 @@ def solve(
                 },
             },
         }
-        # compare モードは single の回路で実際に測定する
         circuit = circuit_s
 
     circuit_depth = circuit.depth()
 
-    # --- シミュレーション実行 ---
-    simulator = AerSimulator()
-    compiled = transpile(circuit, simulator)
-    job = simulator.run(compiled, shots=shots, noise_model=noise_model)
-    counts = job.result().get_counts()
-
-    # --- 結果の解析（リトルエンディアン → ビッグエンディアン）---
-    normalized: dict[str, int] = {}
-    for bitstring, count in counts.items():
-        key = bitstring.replace(" ", "")[::-1]
-        normalized[key] = normalized.get(key, 0) + count
+    try:
+        normalized = _run_circuit(circuit, shots, noise_model=noise_model, seed=seed)
+    except InterruptedError as e:
+        return {
+            "status": "interrupted",
+            "error": str(e),
+            "elapsed_sec": time.perf_counter() - start,
+        }
 
     best_bitstring = None
     best_cost = float("inf")
-    for bitstring, count in sorted(normalized.items(), key=lambda x: -x[1]):
+    for bitstring in sorted(normalized, key=lambda b: -normalized[b]):
         if problem.is_feasible(bitstring):
             cost = problem.cost(bitstring)
             if cost < best_cost:
@@ -334,33 +298,26 @@ def solve(
         }
 
     top_k_list = [
-        {
-            "bitstring": bs,
-            "count": cnt,
-            "probability": round(cnt / shots, 4),
-        }
+        {"bitstring": bs, "count": cnt, "probability": round(cnt / shots, 4)}
         for bs, cnt in sorted(normalized.items(), key=lambda x: -x[1])[:top_k]
     ]
 
     return {
-        # brute_force と共通キー
         "status": "ok",
         "best_bitstring": best_bitstring,
         "best_cost": best_cost,
         "best_route": problem.route_to_str(best_bitstring),
         "elapsed_sec": elapsed,
-        # 量子固有
         "counts": normalized,
         "n_iterations": n_iterations,
         "circuit_depth": circuit_depth,
         "top_k": top_k_list,
-        # ancilla 情報（mode に応じて内容が変わる）
         **ancilla_info,
     }
 
 
 # ---------------------------------------------------------------------------
-# 6. Durr-Hoyer アルゴリズム（反復的しきい値探索）
+# 7. Durr-Hoyer アルゴリズム（反復型 Grover）
 # ---------------------------------------------------------------------------
 
 
@@ -376,169 +333,126 @@ def solve_iterative(
 ) -> dict:
     """Durr-Hoyer アルゴリズムで最適解を探索する。
 
-    閾値を事前に指定せず、反復的にしきい値を下げながら最適解に近づく。
+    手順:
+        1. ランダムに初期解を選ぶ
+        2. 現在の解のコスト threshold で Grover を実行
+        3. より良い解が見つかれば threshold を更新
+        4. max_iterations 回繰り返す
 
-    アルゴリズムの流れ:
-        1. 実行可能解からランダムに1つ選び、そのコストを初期閾値とする。
-        2. 「現在の閾値より良い解」を探す Grover を実行する。
-        3. より良い解が見つかればしきい値を更新して 2 に戻る。
-        4. 見つからなければ現在の最良解を返す。
-
-    出典:
-        Durr, C. & Hoyer, P., "A quantum algorithm for finding the minimum",
-        arXiv:quant-ph/9607014, 1996.
+    Ctrl+C を受け取った場合はその時点の最良解を返す（interrupted フラグ付き）。
 
     Args:
-        problem: OptimizationProblem のインスタンス。
-        shots: 各反復のショット数。
-        max_iterations: 最大反復回数。これを超えたら現在の最良解を返す。
-        top_k: 返り値 top_k リストの件数。
-        ancilla_mode: ancilla の使い方（'single' / 'extra' / 'compare'）。
-        noise_model: ノイズモデル。None の場合は理想シミュレーション。
-        seed: 乱数シード（初期解のランダム選択に使用）。
-        verbose: True のとき各反復の状況を表示する。
-
-    Returns:
-        以下のキーを持つ辞書。
-
-        - ``status``: 'ok' または 'no_feasible_solution'
-        - ``best_bitstring``: 最良解のビット列
-        - ``best_cost``: 最小コスト
-        - ``best_route``: ルート表示文字列
-        - ``n_grover_calls``: Grover を実行した回数
-        - ``history``: 各反復での閾値更新履歴
-        - ``elapsed_sec``: 総実行時間
+        problem: OptimizationProblem のインスタンス
+        shots: 各反復のショット数
+        max_iterations: 最大反復回数
+        top_k: 返り値 top_k リストの件数
+        ancilla_mode: 'single' | 'extra' | 'compare'
+        noise_model: Qiskit Aer のノイズモデル
+        seed: 乱数シード
+        verbose: 各反復の進捗を表示するか
     """
     import random as _random
-    import time
 
-    rng = _random.Random(seed)
     start = time.perf_counter()
+
+    # ── 初期解をランダムに選ぶ ──
     n_qubits = problem.n_qubits_required()
+    rng = _random.Random(seed)
 
-    # --- 実行可能解の列挙 ---
-    all_bitstrings = [format(i, f"0{n_qubits}b") for i in range(2**n_qubits)]
-    feasible = [bs for bs in all_bitstrings if problem.is_feasible(bs)]
+    best_bitstring: str | None = None
+    best_cost = float("inf")
 
-    if not feasible:
+    # 実行可能な初期解を探す
+    for _ in range(2**n_qubits):
+        candidate = format(rng.randint(0, 2**n_qubits - 1), f"0{n_qubits}b")
+        if problem.is_feasible(candidate):
+            best_bitstring = candidate
+            best_cost = problem.cost(candidate)
+            break
+
+    if best_bitstring is None:
         return {
             "status": "no_feasible_solution",
-            "elapsed_sec": time.perf_counter() - start,
+            "error": "初期解が見つかりませんでした。",
+            "elapsed_sec": 0.0,
         }
-
-    # --- 初期解をランダムに選ぶ ---
-    current_best = rng.choice(feasible)
-    current_threshold = problem.cost(current_best)
 
     if verbose:
         print(
-            f"\n  初期解: {problem.route_to_str(current_best)}"
-            f"  コスト: {current_threshold:.1f}"
+            f"  初期解: {problem.route_to_str(best_bitstring)}  コスト: {best_cost:.1f}"
         )
 
-    history = [
-        {
-            "iteration": 0,
-            "threshold": current_threshold,
-            "bitstring": current_best,
-            "route": problem.route_to_str(current_best),
-            "improved": False,
-        }
-    ]
+    history = []
     n_grover_calls = 0
+    interrupted = False
 
-    # --- 反復的探索 ---
-    for i in range(1, max_iterations + 1):
-        # 現在の閾値より良い解を探す条件
-        condition = make_condition_from_cost(
-            cost_fn=problem.cost,
-            threshold=current_threshold,
-            feasibility_fn=problem.is_feasible,
-        )
+    try:
+        for iteration in range(1, max_iterations + 1):
+            # 現在の best_cost より小さい解を探す
+            result = solve(
+                problem=problem,
+                shots=shots,
+                threshold=best_cost,
+                top_k=top_k,
+                ancilla_mode=ancilla_mode,
+                noise_model=noise_model,
+                seed=seed,
+            )
+            n_grover_calls += 1
 
-        # 条件を満たす解が存在するか確認
-        from quantum.oracle import _enumerate_targets
+            if result["status"] == "interrupted":
+                if verbose:
+                    print(f"\n  ⚠️  反復 {iteration} で中断されました。")
+                interrupted = True
+                break
 
-        targets = _enumerate_targets(n_qubits, condition)
-
-        if not targets:
-            if verbose:
-                print(f"  反復 {i}: これ以上改善できる解がありません。探索終了。")
-            break
-
-        # Grover で探索
-        result = solve(
-            problem=problem,
-            shots=shots,
-            condition=condition,
-            top_k=top_k,
-            ancilla_mode=ancilla_mode,
-            noise_model=noise_model,
-        )
-        n_grover_calls += 1
-
-        if result.get("status") == "ok":
-            new_cost = result["best_cost"]
-            new_bitstring = result["best_bitstring"]
-
-            if new_cost < current_threshold:
-                # より良い解が見つかった
-                current_threshold = new_cost
-                current_best = new_bitstring
+            if result["status"] == "ok" and result["best_cost"] < best_cost:
+                best_cost = result["best_cost"]
+                best_bitstring = result["best_bitstring"]
                 improved = True
-
                 if verbose:
                     print(
-                        f"  反復 {i}: 改善 ✅  "
-                        f"{problem.route_to_str(new_bitstring)}"
-                        f"  コスト: {new_cost:.1f}"
+                        f"  ✅ 反復 {iteration:2d}  改善: コスト {best_cost:.1f}  ルート: {problem.route_to_str(best_bitstring)}"
                     )
             else:
                 improved = False
                 if verbose:
-                    print(f"  反復 {i}: 改善なし（コスト {new_cost:.1f}）")
-        else:
-            improved = False
-            if verbose:
-                print(f"  反復 {i}: 解が見つかりませんでした。")
+                    print(
+                        f"     反復 {iteration:2d}  改善なし（閾値: {best_cost:.1f}）"
+                    )
 
-        history.append(
-            {
-                "iteration": i,
-                "threshold": current_threshold,
-                "bitstring": current_best,
-                "route": problem.route_to_str(current_best),
-                "improved": improved,
-            }
-        )
+            history.append(
+                {
+                    "iteration": iteration,
+                    "threshold": best_cost,
+                    "route": (
+                        problem.route_to_str(best_bitstring) if best_bitstring else None
+                    ),
+                    "improved": improved,
+                }
+            )
 
-        # 改善がなければ終了
-        if not improved:
-            break
+    except KeyboardInterrupt:
+        if verbose:
+            print(f"\n  ⚠️  Ctrl+C を受け取りました。現在の最良解を返します。")
+        interrupted = True
 
     elapsed = time.perf_counter() - start
 
-    # top_k の生成（最終反復の counts から）
-    top_k_list = []
-    if n_grover_calls > 0 and result.get("status") == "ok":
-        counts = result.get("counts", {})
-        total = sum(counts.values())
-        top_k_list = [
-            {
-                "bitstring": bs,
-                "count": cnt,
-                "probability": round(cnt / total, 4),
-            }
-            for bs, cnt in sorted(counts.items(), key=lambda x: -x[1])[:top_k]
-        ]
+    if best_bitstring is None:
+        return {"status": "no_feasible_solution", "elapsed_sec": elapsed}
+
+    # solve() と同じ形式で top_k を構成（最終反復の結果を使う）
+    top_k_list = result.get("top_k", []) if "result" in dir() else []
 
     return {
         "status": "ok",
-        "best_bitstring": current_best,
-        "best_cost": current_threshold,
-        "best_route": problem.route_to_str(current_best),
+        "best_bitstring": best_bitstring,
+        "best_cost": best_cost,
+        "best_route": problem.route_to_str(best_bitstring),
+        "elapsed_sec": elapsed,
         "n_grover_calls": n_grover_calls,
         "history": history,
         "top_k": top_k_list,
-        "elapsed_sec": elapsed,
+        "interrupted": interrupted,
     }

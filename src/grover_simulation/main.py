@@ -169,8 +169,14 @@ def _plot_success_rate(
 
     print(f"  成功率グラフ生成中（1〜{r_max}反復）...")
     for r in iterations:
+        # best_cost+epsilon をしきい値にして「best_cost 以下の解」を正解とみなす
+        eps = max(1.0, best_cost * 1e-6) if best_cost > 0 else 1.0
         result = grover_solve(
-            problem=problem, n_iterations=r, shots=shots, noise_model=noise_model
+            problem=problem,
+            n_iterations=r,
+            shots=shots,
+            threshold=best_cost + eps,
+            noise_model=noise_model,
         )
         if result.get("status") == "ok" and result.get("top_k"):
             success_prob = sum(
@@ -210,6 +216,194 @@ def _plot_success_rate(
     if save_path:
         fig.savefig(save_path, dpi=150)
         print(f"  成功率グラフを保存: {save_path.name}")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# ノイズモデル比較可視化
+# ---------------------------------------------------------------------------
+
+# ノイズモデルごとの色
+_NOISE_COLORS = {
+    "ideal": "#2563eb",  # 青
+    "depol": "#d97706",  # 橙
+    "thermal": "#16a34a",  # 緑
+    "readout": "#9333ea",  # 紫
+    "combined": "#dc2626",  # 赤
+}
+
+
+def _plot_noise_comparison(
+    comparison_rows: list[dict],
+    bf_best_cost: float,
+    output_dir: Path | None,
+) -> None:
+    """ノイズモデル別の比較棒グラフを生成する。
+
+    左軸：最小コスト（棒グラフ）
+    右軸：実行時間（折れ線）
+    古典の最適コストを水平破線で表示
+    """
+    valid = [r for r in comparison_rows if r["best_cost"] is not None]
+    if not valid:
+        print("  ⚠️  比較グラフ: 有効なデータがありません。")
+        return
+
+    labels = [r["noise_model"] for r in valid]
+    costs = [r["best_cost"] for r in valid]
+    times = [r["elapsed_sec"] for r in valid]
+    optimals = [r["optimal"] for r in valid]
+    colors = [_NOISE_COLORS.get(l, "#888888") for l in labels]
+
+    fig, ax1 = plt.subplots(figsize=(9, 5))
+
+    # 棒グラフ（コスト）
+    bars = ax1.bar(
+        labels, costs, color=colors, alpha=0.75, width=0.5, label="最小コスト"
+    )
+
+    # 最適解マーク
+    for bar, ok in zip(bars, optimals):
+        if ok:
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + max(costs) * 0.02,
+                "✅",
+                ha="center",
+                va="bottom",
+                fontsize=13,
+            )
+
+    # 古典の最適コストを破線で表示
+    ax1.axhline(
+        bf_best_cost,
+        color="#374151",
+        linestyle="--",
+        linewidth=1.2,
+        label=f"古典最適コスト: {bf_best_cost:.1f}",
+    )
+    ax1.set_ylabel("最小コスト")
+    ax1.set_ylim(0, max(costs) * 1.25 if max(costs) > 0 else 1)
+    ax1.set_xlabel("ノイズモデル")
+    ax1.set_title("ノイズモデル別 最小コスト・実行時間比較")
+
+    # 折れ線グラフ（実行時間）を右軸に
+    ax2 = ax1.twinx()
+    ax2.plot(
+        labels,
+        times,
+        color="#6b7280",
+        marker="o",
+        linewidth=1.5,
+        markersize=6,
+        linestyle="--",
+        label="実行時間",
+    )
+    ax2.set_ylabel("実行時間（秒）")
+    ax2.set_ylim(0, max(times) * 1.4 if max(times) > 0 else 1)
+
+    # 凡例を統合
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=9)
+
+    fig.tight_layout()
+
+    if output_dir:
+        save_path = output_dir / "noise_comparison.png"
+        fig.savefig(save_path, dpi=150)
+        print(f"  比較棒グラフを保存: {save_path.name}")
+    else:
+        plt.show()
+    plt.close(fig)
+
+
+def _plot_success_rate_comparison(
+    problem: VehicleRoutingProblem,
+    best_cost: float,
+    shots: int,
+    cfg: dict,
+    output_dir: Path | None,
+) -> None:
+    """全ノイズモデルの成功率を1枚のグラフに重ねて表示する。
+
+    横軸：Grover 反復回数
+    縦軸：正解確率
+    各ノイズモデルを異なる色の折れ線で表示
+    最適反復回数を縦破線で表示
+    """
+    n = problem.n_cities
+    factorial = math.factorial(n - 1)
+    r_opt = max(1, round(math.pi / 4 * math.sqrt(factorial)))
+    r_max = min(r_opt * 3, 30)  # 一括比較なので上限を抑える
+    iterations = list(range(1, r_max + 1))
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    for noise in ALL_NOISE_MODELS:
+        run_cfg = {**cfg, "noise_model": noise}
+        try:
+            noise_model = _build_noise_model(run_cfg)
+        except Exception as e:
+            print(f"  ⚠️  [{noise}] ノイズモデル構築失敗: {e}")
+            continue
+
+        success_rates = []
+        print(f"  [{noise}] 成功率計算中（1〜{r_max}反復）...")
+        eps = max(1.0, best_cost * 1e-6) if best_cost > 0 else 1.0
+        for r in iterations:
+            try:
+                result = grover_solve(
+                    problem=problem,
+                    n_iterations=r,
+                    shots=shots,
+                    threshold=best_cost + eps,
+                    noise_model=noise_model,
+                )
+                if result.get("status") == "ok" and result.get("top_k"):
+                    prob = sum(
+                        e["probability"]
+                        for e in result["top_k"]
+                        if abs(e.get("cost", float("inf")) - best_cost) < 1e-6
+                    )
+                else:
+                    prob = 0.0
+            except Exception:
+                prob = 0.0
+            success_rates.append(prob)
+
+        color = _NOISE_COLORS.get(noise, "#888888")
+        ax.plot(
+            iterations,
+            success_rates,
+            marker="o",
+            markersize=3,
+            linewidth=1.5,
+            color=color,
+            label=noise,
+        )
+
+    ax.axvline(
+        x=r_opt,
+        color="#374151",
+        linestyle="--",
+        linewidth=1,
+        label=f"最適反復回数 R={r_opt}",
+    )
+    ax.set_xlabel("Grover 反復回数")
+    ax.set_ylabel("正解確率")
+    ax.set_title("ノイズモデル別 反復回数 vs 正解確率")
+    ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+
+    if output_dir:
+        save_path = output_dir / "success_rate_comparison.png"
+        fig.savefig(save_path, dpi=150)
+        print(f"  成功率比較グラフを保存: {save_path.name}")
     else:
         plt.show()
     plt.close(fig)
@@ -299,6 +493,20 @@ def _run_noise_comparison(
             json.dump(comparison_rows, f, ensure_ascii=False, indent=2, default=str)
         print(f"\n  比較結果を保存しました: {save_path.name}")
 
+    # ── 比較グラフの生成 ──
+    bf_cost = bf_result.get("best_cost", 0) if bf_result.get("status") == "ok" else 0
+    print("\n  比較棒グラフを生成中...")
+    try:
+        _plot_noise_comparison(comparison_rows, bf_cost, output_dir)
+    except Exception as e:
+        print(f"  ⚠️  比較棒グラフの生成に失敗しました: {e}")
+
+    print("  成功率比較グラフを生成中...")
+    try:
+        _plot_success_rate_comparison(problem, bf_cost, cfg["shots"], cfg, output_dir)
+    except Exception as e:
+        print(f"  ⚠️  成功率比較グラフの生成に失敗しました: {e}")
+
 
 # ---------------------------------------------------------------------------
 # メイン
@@ -331,6 +539,24 @@ def main() -> None:
     if len(cfg.get("city_names", [])) < 2:
         print("❌ 都市数が不足しています（最低2都市必要です）。")
         sys.exit(1)
+
+    # ── 距離行列の検証・補完 ──
+    dm = cfg.get("distance_matrix", [])
+    DEFAULT_DIST = 10.0
+    if dm:
+        n = len(dm)
+        filled = 0
+        for i in range(n):
+            for j in range(n):
+                if i != j and (not dm[i][j] or dm[i][j] == 0):
+                    dm[i][j] = DEFAULT_DIST
+                    filled += 1
+        if filled > 0:
+            print(
+                f"\n💡 距離の空欄 {filled // 2} ペアを {DEFAULT_DIST:.0f} km で補完しました。"
+            )
+            print("   正確な距離を使いたい場合は UI で入力し直してください。\n")
+        cfg["distance_matrix"] = dm
 
     # ── 問題の生成 ──
     try:
@@ -387,6 +613,8 @@ def main() -> None:
         verbose=True,
     )
     _print_result(f"量子（Durr-Hoyer / {cfg['noise_model']}）", grover_result)
+    if grover_result.get("interrupted"):
+        print("\n  ⚠️  途中で中断されました。上記はその時点での最良解です。")
 
     if bf_result.get("status") == "ok" and grover_result.get("status") == "ok":
         report = compare(
@@ -427,6 +655,9 @@ def main() -> None:
         )
     except Exception as e:
         print(f"  ⚠️  成功率グラフの生成に失敗しました: {e}")
+        import traceback
+
+        traceback.print_exc()
 
     print("\n確率変化アニメーションを生成中...")
     try:

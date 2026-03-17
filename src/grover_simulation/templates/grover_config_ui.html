@@ -305,7 +305,7 @@ const STEP_CONTENT = [
     } else {
       extra = `<div class="field">
         <label>都市名</label>
-        <div class="hint">カンマ区切りで2都市以上入力してください。例: 札幌, 仙台, 東京, 名古屋</div>
+        <div class="hint">カンマ区切りで2都市以上入力してください。例: 札幌, 仙台, 東京, 名古屋<br><span style="color:#92400e;">⚠️ 座標自動取得を使う場合は実際の地名を入力してください（A, B などの記号は正しく取得できません）。</span></div>
         <input type="text" value="${S.cityNames.join(', ')}" oninput="S.cityNames=this.value.split(',').map(s=>s.trim()).filter(Boolean);render()">
       </div>
       <div class="field">
@@ -322,7 +322,7 @@ const STEP_CONTENT = [
         <div class="section-title">入力方法</div>
         <div class="chip-group">
           ${chip('cityMode','sample','サンプルを選ぶ')}
-          ${chip('cityMode','count','都市数を指定')}
+          ${chip('cityMode','count','都市数を指定', 'S.useGeo=false;')}
           ${chip('cityMode','name','都市名を入力')}
         </div>
       </div>
@@ -528,7 +528,7 @@ function distInputHTML(names) {
   if (S.distMode === 'pair') {
     return tabs + `
       <div class="hint" style="margin-bottom:10px;">
-        都市ペアごとに距離（km）を入力してください。A↔B と B↔A は同じ値として扱われます。
+        都市ペアごとに距離（km）を入力してください。A↔B と B↔A は同じ値として扱われます。<br><span style="color:#555;">💡 空欄のままにした場合は <strong>10 km</strong> として自動補完されます。</span>
       </div>
       ${pairHTML(names)}`;
   }
@@ -559,7 +559,7 @@ function distInputHTML(names) {
   // matrix モード（従来の行列入力）
   return tabs + `
     <div class="hint" style="margin-bottom:10px;">
-      各都市間の距離を直接入力します。対角成分（自分→自分）は 0 で固定です。
+      各都市間の距離を直接入力します。対角成分（自分→自分）は 0 で固定です。<br><span style="color:#555;">💡 空欄のままにした場合は <strong>10 km</strong> として自動補完されます。</span>
     </div>
     ${matrixHTML(names)}`;
 }
@@ -639,6 +639,23 @@ function exportCfg() {
 
   // ペア入力モードの場合、送信前に行列を同期する
   if (S.distMode === 'pair') syncPair();
+
+  // 空欄（0）の距離をデフォルト値 10 で補完する（対角成分は除く）
+  if (!S.useGeo && S.distMatrix.length > 0) {
+    const DEFAULT_DIST = 10;
+    let補完あり = false;
+    for (let i = 0; i < S.distMatrix.length; i++) {
+      for (let j = 0; j < S.distMatrix[i].length; j++) {
+        if (i !== j && (!S.distMatrix[i][j] || S.distMatrix[i][j] === 0)) {
+          S.distMatrix[i][j] = DEFAULT_DIST;
+          補完あり = true;
+        }
+      }
+    }
+    if (補完あり) {
+      console.log('距離の空欄を 10 km で補完しました。');
+    }
+  }
 
   const cfg = {
     city_names: S.cityNames,

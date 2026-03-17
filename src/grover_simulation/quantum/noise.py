@@ -228,7 +228,10 @@ def build_thermal_model(
     gate_time_meas_ns = _to_ns(gate_time_measure)
 
     error_1q = thermal_relaxation_error(t1_ns, t2_ns, gate_time_1q_ns)
-    error_2q = thermal_relaxation_error(t1_ns, t2_ns, gate_time_2q_ns)
+    # 2Q ゲートには各 qubit 独立の熱緩和エラーを tensor 積で合成する
+    error_2q = thermal_relaxation_error(t1_ns, t2_ns, gate_time_2q_ns).expand(
+        thermal_relaxation_error(t1_ns, t2_ns, gate_time_2q_ns)
+    )
     error_measure = thermal_relaxation_error(t1_ns, t2_ns, gate_time_meas_ns)
 
     noise_model.add_all_qubit_quantum_error(error_1q, gates_1q)

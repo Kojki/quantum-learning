@@ -1,0 +1,105 @@
+{
+  "timestamp": "20260317_224847",
+  "config": {
+    "city_names": [
+      "東京",
+      "大阪",
+      "名古屋",
+      "福岡"
+    ],
+    "use_geo": true,
+    "max_iterations": 2,
+    "shots": 1024,
+    "ancilla_mode": "single",
+    "noise_model": "ideal",
+    "device": "eagle_r3",
+    "seed": 42,
+    "output_dir": "output",
+    "gate_time_1q": 6e-08
+  },
+  "classical": {
+    "status": "ok",
+    "best_bitstring": "00100111",
+    "best_cost": 941.0,
+    "best_route": "東京 → 名古屋 → 大阪 → 福岡 → 東京",
+    "n_evaluated": 24,
+    "n_total": 256,
+    "all_costs": [
+      988.9000000000001,
+      1099.1,
+      941.0,
+      1099.1,
+      941.0,
+      988.9,
+      1099.1,
+      988.9,
+      941.0,
+      988.9000000000001,
+      941.0,
+      1099.1,
+      1099.1,
+      941.0000000000001,
+      988.9000000000001,
+      941.0000000000001,
+      988.9,
+      1099.1,
+      988.9,
+      941.0000000000001,
+      1099.1,
+      941.0,
+      1099.1,
+      988.9000000000001
+    ],
+    "elapsed_sec": 0.004026900000098976
+  },
+  "quantum": {
+    "status": "ok",
+    "best_bitstring": "01110010",
+    "best_cost": 941.0,
+    "best_route": "大阪 → 福岡 → 東京 → 名古屋 → 大阪",
+    "elapsed_sec": 1.8137517000004664,
+    "n_grover_calls": 2,
+    "history": [
+      {
+        "iteration": 1,
+        "threshold": 941.0,
+        "route": "大阪 → 福岡 → 東京 → 名古屋 → 大阪",
+        "improved": true
+      },
+      {
+        "iteration": 2,
+        "threshold": 941.0,
+        "route": "大阪 → 福岡 → 東京 → 名古屋 → 大阪",
+        "improved": false
+      }
+    ],
+    "top_k": [
+      {
+        "bitstring": "01101100",
+        "count": 216,
+        "probability": 0.2109
+      },
+      {
+        "bitstring": "00011011",
+        "count": 199,
+        "probability": 0.1943
+      },
+      {
+        "bitstring": "01001110",
+        "count": 183,
+        "probability": 0.1787
+      },
+      {
+        "bitstring": "11100100",
+        "count": 182,
+        "probability": 0.1777
+      },
+      {
+        "bitstring": "11000110",
+        "count": 178,
+        "probability": 0.1738
+      }
+    ],
+    "interrupted": false
+  }
+}
