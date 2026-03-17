@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import signal
+import sys
 from threading import Thread, Event
 
 from flask import Flask, render_template, request
@@ -8,7 +10,6 @@ import config
 
 app = Flask(__name__)
 
-# threading.Event でスレッドセーフに設定受信を待機する
 _cfg_ready = Event()
 _cfg_result: dict | None = None
 
@@ -26,7 +27,7 @@ def index():
 def submit():
     """Web UI（ステップ形式）から設定を受け取る。
 
-    gate_time_1q は UI に持たせず、選択されたデバイスプリセットから自動補完する。
+    gate_time_1q はデバイスプリセットから自動補完する。
     """
     global _cfg_result
     from quantum.noise import DEVICE_PRESETS
@@ -51,7 +52,7 @@ def submit_file():
 
 
 # ---------------------------------------------------------------------------
-# config.py 読み込み（input_handler.py を廃止したため、ここに移植）
+# config.py 読み込み
 # ---------------------------------------------------------------------------
 
 
@@ -82,19 +83,36 @@ def _load_config_from_file() -> dict:
 
 
 def get_config_from_web() -> dict:
-    """Flask サーバーを起動し、Web UI から設定が届くまで待機して返す。"""
+    """Flask サーバーを起動し、Web UI から設定が届くまで待機して返す。
+
+    Ctrl+C を受け取った場合はプロセスを終了する。
+    """
     global _cfg_result
     _cfg_result = None
     _cfg_ready.clear()
 
     def _run_server() -> None:
+        # Flask の開発サーバーログを最小限に抑える
+        import logging
+
+        log = logging.getLogger("werkzeug")
+        log.setLevel(logging.ERROR)
         app.run(port=5000, debug=False, use_reloader=False)
 
     t = Thread(target=_run_server, daemon=True)
     t.start()
 
-    print("ブラウザで http://127.0.0.1:5000 を開いて設定してください。")
+    print("\nブラウザで http://127.0.0.1:5000 を開いて設定してください。")
     print("設定完了後『コードを生成』ボタンを押してください。")
+    print("中断する場合は Ctrl+C を押してください。\n")
 
-    _cfg_ready.wait()
+    # Ctrl+C でブロックを解除してプロセスを終了できるよう
+    # タイムアウト付きのポーリングループで待機する
+    try:
+        while not _cfg_ready.is_set():
+            _cfg_ready.wait(timeout=0.5)
+    except KeyboardInterrupt:
+        print("\n⚠️  中断されました。終了します。")
+        sys.exit(0)
+
     return _cfg_result

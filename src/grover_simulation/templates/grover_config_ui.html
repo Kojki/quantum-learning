@@ -257,11 +257,11 @@ const STEP_CONTENT = [
       const names = Array.from({length: S.cityCount}, (_,i) => String.fromCharCode(65+i));
       extra = `<div class="field">
         <label>都市数</label>
-        <div class="hint">2〜8都市まで設定できます。都市名は A, B, C... と自動的に割り当てられます。</div>
+        <div class="hint">2〜50都市まで設定できます。都市名は A, B, C, ... と自動的に割り当てられます（26都市を超える場合は AA, AB, ... と続きます）。</div>
         <div style="margin-top:10px;">
           <div class="slider-row">
-            <input type="range" min="2" max="8" value="${S.cityCount}" step="1"
-              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>String.fromCharCode(65+i));S.distMatrix=[];let _f=1;for(let _i=2;_i<=S.cityCount-1;_i++)_f*=_i;S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(_f)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
+            <input type="range" min="2" max="50" value="${S.cityCount}" step="1"
+              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>i<26?String.fromCharCode(65+i):String.fromCharCode(65+Math.floor((i-26)/26))+String.fromCharCode(65+(i-26)%26));S.distMatrix=[];let _f=1;for(let _i=2;_i<=S.cityCount-1;_i++)_f*=_i;S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(_f)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
             <span class="slider-val" id="cntOut">${S.cityCount}</span>
           </div>
         </div>
@@ -311,9 +311,10 @@ const STEP_CONTENT = [
       <div class="field">
         <label>Durr-Hoyer 最大反復回数</label>
         <div style="margin-top:10px;" class="slider-row">
-          <input type="range" min="1" max="50" value="${S.maxIter}" step="1"
+          <input type="range" min="1" id="maxIterSlider" value="${S.maxIter}" step="1"
             oninput="S.maxIter=+this.value;document.getElementById('miOut').textContent=this.value">
           <span class="slider-val" id="miOut">${S.maxIter}</span>
+
         </div>
         <div class="hint">
           Grover 探索の最適な反復回数は <strong>R ≈ (π/4)√N</strong>（N = 解候補数 = (都市数−1)!）で与えられます。
@@ -414,6 +415,18 @@ function render() {
       : `<button class="btn-next" onclick="S.step++;render()">次へ</button>`}
   </div>`;
   document.getElementById('stepContent').innerHTML = content + nav;
+  updateSliderMax();
+}
+
+function updateSliderMax() {
+  var el = document.getElementById('maxIterSlider');
+  if (!el) return;
+  var n = S.cityNames.length, f = 1;
+  for (var i = 2; i <= n - 1; i++) f *= i;
+  var opt = Math.max(1, Math.round(Math.PI / 4 * Math.sqrt(f)));
+  var sliderMax = Math.min(9999, Math.max(opt * 3, 50));
+  el.max = sliderMax;
+  if (S.maxIter > sliderMax) { S.maxIter = sliderMax; el.value = sliderMax; }
 }
 
 function exportCfg() {
