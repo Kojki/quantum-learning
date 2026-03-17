@@ -15,6 +15,30 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+import matplotlib.font_manager as fm
+
+
+# 日本語フォントの設定（環境に応じてフォールバック）
+def _setup_fonts():
+    candidates = [
+        "MS Gothic",
+        "Yu Gothic",
+        "Meiryo",  # Windows
+        "Hiragino Sans",
+        "Hiragino Kaku Gothic Pro",  # macOS
+        "Noto Sans CJK JP",
+        "IPAexGothic",
+        "IPAGothic",  # Linux
+    ]
+    available = {f.name for f in fm.fontManager.ttflist}
+    for font in candidates:
+        if font in available:
+            plt.rcParams["font.family"] = font
+            return
+    # フォールバック: 日本語を英語に切り替えるため何もしない
+
+
+_setup_fonts()
 
 from classical.brute_force import solve as bf_solve
 from problems.routing import VehicleRoutingProblem
@@ -203,11 +227,11 @@ def _plot_success_rate(
         color="#dc2626",
         linestyle="--",
         linewidth=1,
-        label=f"最適反復回数 R={r_opt}",
+        label=f"Optimal R={r_opt}",
     )
-    ax.set_xlabel("Grover 反復回数")
-    ax.set_ylabel("正解確率")
-    ax.set_title(f"反復回数と正解確率の関係（{noise_label}）")
+    ax.set_xlabel("Grover Iterations")
+    ax.set_ylabel("Success Rate")
+    ax.set_title(f"Success Rate vs Iterations ({noise_label})")
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -260,21 +284,22 @@ def _plot_noise_comparison(
     fig, ax1 = plt.subplots(figsize=(9, 5))
 
     # 棒グラフ（コスト）
-    bars = ax1.bar(
-        labels, costs, color=colors, alpha=0.75, width=0.5, label="最小コスト"
-    )
+    bars = ax1.bar(labels, costs, color=colors, alpha=0.75, width=0.5, label="Min Cost")
 
-    # 最適解マーク
+    # 最適解マーク（絵文字非対応環境のため ★ で代替）
     for bar, ok in zip(bars, optimals):
-        if ok:
-            ax1.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + max(costs) * 0.02,
-                "✅",
-                ha="center",
-                va="bottom",
-                fontsize=13,
-            )
+        mark = "✓" if ok else "✗"
+        color = "#16a34a" if ok else "#dc2626"
+        ax1.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + max(costs) * 0.02,
+            mark,
+            ha="center",
+            va="bottom",
+            fontsize=14,
+            color=color,
+            fontweight="bold",
+        )
 
     # 古典の最適コストを破線で表示
     ax1.axhline(
@@ -282,12 +307,12 @@ def _plot_noise_comparison(
         color="#374151",
         linestyle="--",
         linewidth=1.2,
-        label=f"古典最適コスト: {bf_best_cost:.1f}",
+        label=f"Classical Optimal: {bf_best_cost:.1f}",
     )
-    ax1.set_ylabel("最小コスト")
+    ax1.set_ylabel("Min Cost")
     ax1.set_ylim(0, max(costs) * 1.25 if max(costs) > 0 else 1)
-    ax1.set_xlabel("ノイズモデル")
-    ax1.set_title("ノイズモデル別 最小コスト・実行時間比較")
+    ax1.set_xlabel("Noise Model")
+    ax1.set_title("Noise Model Comparison: Min Cost & Elapsed Time")
 
     # 折れ線グラフ（実行時間）を右軸に
     ax2 = ax1.twinx()
@@ -299,9 +324,9 @@ def _plot_noise_comparison(
         linewidth=1.5,
         markersize=6,
         linestyle="--",
-        label="実行時間",
+        label="Elapsed Time",
     )
-    ax2.set_ylabel("実行時間（秒）")
+    ax2.set_ylabel("Elapsed Time (s)")
     ax2.set_ylim(0, max(times) * 1.4 if max(times) > 0 else 1)
 
     # 凡例を統合
@@ -390,11 +415,11 @@ def _plot_success_rate_comparison(
         color="#374151",
         linestyle="--",
         linewidth=1,
-        label=f"最適反復回数 R={r_opt}",
+        label=f"Optimal R={r_opt}",
     )
-    ax.set_xlabel("Grover 反復回数")
-    ax.set_ylabel("正解確率")
-    ax.set_title("ノイズモデル別 反復回数 vs 正解確率")
+    ax.set_xlabel("Grover Iterations")
+    ax.set_ylabel("Success Rate")
+    ax.set_title("Success Rate vs Iterations by Noise Model")
     ax.yaxis.set_major_formatter(ticker.PercentFormatter(xmax=1.0))
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
@@ -477,7 +502,9 @@ def _run_noise_comparison(
     print(f"  {'-' * 56}")
     for r in comparison_rows:
         cost_str = f"{r['best_cost']:.1f}" if r["best_cost"] is not None else "失敗"
-        optimal_str = "✅" if r["optimal"] else ("❌" if r["optimal"] is False else "-")
+        optimal_str = (
+            "[OK]" if r["optimal"] else ("[NG]" if r["optimal"] is False else "-")
+        )
         elapsed_str = (
             f"{r['elapsed_sec']:.3f}s" if r["elapsed_sec"] is not None else "-"
         )
