@@ -20,16 +20,18 @@ ANCILLA_MODE = "single"  # "single" | "extra" | "compare"
 TOP_K = 5
 
 # Durr-Hoyer アルゴリズムの最大反復回数
-# 改善が見つからなくなった時点で早期終了する
-MAX_ITERATIONS = 10
+# 最適値は R ≈ (π/4)√N （N = 解候補数 = (都市数-1)!）
+# 都市数4の場合: N = 3! = 6, R ≈ round(π/4 × √6) = 2
+MAX_ITERATIONS = 2
 
 # ---------------------------------------------------------------------------
 # ノイズモデル設定
 # ---------------------------------------------------------------------------
 
+# 使用可能なノイズモデル: "ideal" | "depol" | "thermal" | "readout" | "combined"
+# ゲート時間などのデバイス依存パラメータは quantum/noise.py の DEVICE_PRESETS を参照
 NOISE_MODEL = "ideal"
-GATE_TIME_1Q = 50e-9
-DEVICE = "eagle_r3"
+DEVICE = "eagle_r3"  # "eagle_r3" | "heron_r1" | "heron_r2" | "heron_r3"
 
 # ---------------------------------------------------------------------------
 # 乱数シード

@@ -45,7 +45,8 @@ def geocode_cities(
         取得できなかった地名はスキップされる。
 
     Raises:
-        RuntimeError: 1件も座標が取得できなかった場合。
+        RuntimeError: 取得できた都市が2件未満の場合
+                      （VRP は最低2都市必要なため）。
     """
     geolocator = Nominatim(
         user_agent="grover_simulation_tsp",
@@ -67,23 +68,27 @@ def geocode_cities(
                 print(f"  ⚠️  見つかりませんでした: {name}")
                 failed.append(name)
         except GeocoderTimedOut:
-            print(f"  ⚠️  タイムアウト: {name}")
+            print(f"  ⚠️  タイムアウト: {name}（接続が遅い可能性があります）")
             failed.append(name)
         except GeocoderServiceError as e:
             print(f"  ⚠️  サービスエラー: {name} ({e})")
             failed.append(name)
+        except Exception as e:
+            print(f"  ⚠️  予期しないエラー: {name} ({type(e).__name__}: {e})")
+            failed.append(name)
 
-        # リクエスト間の待機
         time.sleep(wait_sec)
-
-    if not coords:
-        raise RuntimeError(
-            "座標の取得に失敗しました。"
-            "地名が正しいか、インターネット接続を確認してください。"
-        )
 
     if failed:
         print(f"\n  以下の地名は取得できませんでした: {failed}")
-        print("  取得できた地名のみで続行します。")
+
+    if len(coords) < 2:
+        raise RuntimeError(
+            f"座標を取得できた都市が {len(coords)} 件のみです（最低2都市必要）。\n"
+            "地名のスペルを確認するか、距離行列を手動で入力してください。"
+        )
+
+    if failed:
+        print(f"  取得できた {len(coords)} 都市のみで続行します。\n")
 
     return coords

@@ -239,7 +239,7 @@ function renderProg() {
 }
  
 function deviceGrid() {
-  const showDevice = S.noise === 'thermal' || S.noise === 'combined' || S.noise === 'readout';
+  const showDevice = S.noise === 'thermal' || S.noise === 'combined' || S.noise === 'readout' || S.noise === 'all';
   if (!showDevice) return '';
   const cards = Object.entries(DEVICES).map(([key, d]) => {
     const sel = S.device === key;
@@ -379,6 +379,7 @@ const STEP_CONTENT = [
         ${optCard('noise','thermal','thermal relaxation（熱緩和ノイズ）','T1・T2 緩和時間とゲート時間をもとにノイズを模擬します。コヒーレンス時間の影響を単独で評価できます。デバイスプリセットの選択が必要です。')}
         ${optCard('noise','readout','readout（読み出しエラーのみ）','測定時に発生する読み出しエラー（P(1|0)・P(0|1)）のみを模擬します。測定精度の影響だけを切り出して評価したいときに使います。')}
         ${optCard('noise','combined','combined（複合ノイズ）','脱分極・熱緩和・読み出しの3種のノイズを合わせた、最もリアルなモデルです。実機相当の環境でアルゴリズムを評価できます。デバイスプリセットの選択が必要です。')}
+        ${optCard('noise','all','all（一括比較）','ideal・depol・thermal・readout・combined の5種をすべて実行して結果を並べて比較します。各ノイズモデルの影響を一度に確認したいときに使います。デバイスプリセットの選択が必要です。')}
       </div>
       ${deviceGrid()}
 
@@ -420,7 +421,7 @@ const STEP_CONTENT = [
       ['ショット数', S.shots.toLocaleString()],
       ['Ancilla モード', S.ancilla],
       ['ノイズモデル', S.noise],
-      ...(['thermal','combined'].includes(S.noise) ? [['デバイス', DEVICES[S.device] ? DEVICES[S.device].label : S.device]] : []),
+      ...(['thermal','combined','readout','all'].includes(S.noise) ? [['デバイス', DEVICES[S.device] ? DEVICES[S.device].label : S.device]] : []),
       ['乱数シード', S.seed],
       ['出力先', S.outputDir||'（ウィンドウ表示のみ）'],
     ];
