@@ -105,6 +105,15 @@ config.py と同じ形式の設定辞書を返す。
   .device-stats { font-size: 11px; color: #888; line-height: 1.7; }
   .device-card.selected .device-stats { color: #3b82f6; }
   code { font-family: monospace; font-size: 12px; background: #f4f4f4; padding: 1px 5px; border-radius: 3px; }
+  .pair-grid { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+  .pair-row { display: flex; align-items: center; gap: 12px; }
+  .pair-label { font-size: 13px; color: #444; min-width: 120px; flex-shrink: 0; }
+  .pair-row input { width: 90px; padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; color: #111; outline: none; }
+  .pair-row input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px #dbeafe; }
+  .csv-upload-area { border: 2px dashed #d0d0d0; border-radius: 8px; padding: 28px 16px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+  .csv-upload-area:hover { border-color: #2563eb; background: #fafcff; }
+  .csv-upload-icon { font-size: 28px; margin-bottom: 8px; }
+  .csv-upload-text { font-size: 13px; color: #555; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -156,7 +165,7 @@ let S = {
   step: 0, configMode: 'interactive', cityMode: 'sample', sampleId: '1',
   cityCount: 4, cityNames: ['東京', '大阪', '名古屋', '福岡'], useGeo: true, distMatrix: [],
   maxIter: 2, shots: 1024, ancilla: 'single', noise: 'ideal', device: 'eagle_r3',
-  seed: 42, outputDir: 'output'
+  distMode: 'pair', seed: 42, outputDir: 'output'
 };
  
 function chip(group, val, label, onchange) {
@@ -183,7 +192,7 @@ function matrixHTML(names) {
     for (let j=0;j<n;j++) {
       if (i===j) { rows += `<td class="diag">0</td>`; continue; }
       const def = S.distMatrix[i]?.[j] ?? (i+j+1)*5;
-      rows += `<td><input type="number" min="0" value="${def}" id="mx_${i}_${j}" oninput="syncMx()"></td>`;
+      rows += `<td><input type="number" min="0" value="${def}" id="mx_${i}_${j}" oninput="syncMx()" onkeydown="matrixNav(event,${i},${j},${n})"></td>`;
     }
     rows += '</tr>';
   }
@@ -197,6 +206,28 @@ function syncMx() {
     const el=document.getElementById(`mx_${i}_${j}`);
     return el?parseFloat(el.value)||0:0;
   }));
+}
+
+function matrixNav(e, row, col, n) {
+  // 上下左右キーでセル間を移動する
+  // ↑↓ は数値変更のデフォルト動作も抑止する
+  const DIRS = { ArrowUp: [-1,0], ArrowDown: [1,0], ArrowLeft: [0,-1], ArrowRight: [0,1] };
+  const dir = DIRS[e.key];
+  if (!dir) return;
+  e.preventDefault(); // デフォルト動作（数値変更・カーソル移動）を抑止
+
+  let r = row + dir[0];
+  let c = col + dir[1];
+
+  // 行をまたぐ折り返し
+  while (r >= 0 && r < n && c >= 0 && c < n) {
+    if (r !== c) { // 対角セルはスキップ
+      const el = document.getElementById('mx_' + r + '_' + c);
+      if (el) { el.focus(); el.select(); return; }
+    }
+    r += dir[0];
+    c += dir[1];
+  }
 }
  
 function renderProg() {
@@ -267,9 +298,8 @@ const STEP_CONTENT = [
         </div>
       </div>
       <div class="field">
-        <label>距離行列（km）</label>
-        <div class="hint">各都市間の距離を入力してください。対角成分（自分→自分）は 0 で固定です。</div>
-        <div style="margin-top:8px;" id="matrixArea">${matrixHTML(names)}</div>
+        <label>距離の入力方法</label>
+        ${distInputHTML(names)}
       </div>`;
     } else {
       extra = `<div class="field">
@@ -282,7 +312,7 @@ const STEP_CONTENT = [
         ${optCard('useGeo',true,'座標から自動取得（推奨）','地名をもとにインターネットから座標を取得し、実際の直線距離を計算します。インターネット接続が必要です。','render()')}
         ${optCard('useGeo',false,'距離行列を手動で入力','都市間の距離を自分で入力します。インターネット不要で、独自の距離も設定できます。','render()')}
       </div>
-      ${!S.useGeo?`<div class="field"><label>距離行列（km）</label><div class="hint">各都市間の距離を入力してください。</div><div style="margin-top:8px;">${matrixHTML(S.cityNames)}</div></div>`:''}`;
+      ${!S.useGeo?`<div class="field"><label>距離の入力方法</label>${distInputHTML(S.cityNames)}</div>`:''}`;
     }
     return `
       <h2>都市の設定</h2>
@@ -404,6 +434,134 @@ const STEP_CONTENT = [
   }
 ];
  
+// ---------------------------------------------------------------------------
+// 距離入力UI
+// ---------------------------------------------------------------------------
+
+function pairHTML(names) {
+  // 都市ペアごとに入力する UI（上三角のみ、A→B = B→A）
+  const n = names.length;
+  let rows = '';
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const def = S.distMatrix[i] && S.distMatrix[i][j] != null ? S.distMatrix[i][j] : '';
+      rows += `<div class="pair-row">
+        <span class="pair-label">${names[i]} ↔ ${names[j]}</span>
+        <input type="number" min="0" step="0.1" value="${def}" placeholder="km"
+          id="pr_${i}_${j}" oninput="syncPair()">
+      </div>`;
+    }
+  }
+  return `<div class="pair-grid">${rows}</div>`;
+}
+
+function syncPair() {
+  const n = S.cityNames.length;
+  // 対称行列を再構築
+  const m = Array.from({length: n}, () => Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const el = document.getElementById('pr_' + i + '_' + j);
+      const v = el ? (parseFloat(el.value) || 0) : 0;
+      m[i][j] = v;
+      m[j][i] = v;
+    }
+  }
+  S.distMatrix = m;
+}
+
+function handleCsvUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const text = e.target.result;
+    const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+    // ヘッダー行があるか判定（先頭セルが数値でなければヘッダーとみなす）
+    let dataLines = lines;
+    let headerNames = null;
+    const firstCell = lines[0].split(',')[0].trim();
+    if (isNaN(parseFloat(firstCell))) {
+      headerNames = lines[0].split(',').map(s => s.trim());
+      dataLines = lines.slice(1);
+      // 先頭列が都市名の場合は除く
+      if (isNaN(parseFloat(dataLines[0].split(',')[0]))) {
+        dataLines = dataLines.map(l => l.split(',').slice(1).join(','));
+        // headerNames の先頭も除く
+        headerNames = headerNames.slice(1);
+      }
+    }
+    const matrix = dataLines.map(l =>
+      l.split(',').map(v => parseFloat(v.trim()) || 0)
+    );
+    const n = matrix.length;
+    S.distMatrix = matrix;
+    if (headerNames && headerNames.length === n) {
+      S.cityNames = headerNames;
+    } else {
+      S.cityNames = Array.from({length: n}, (_, i) =>
+        i < 26 ? String.fromCharCode(65 + i)
+                : String.fromCharCode(65 + Math.floor((i-26)/26)) + String.fromCharCode(65 + (i-26)%26)
+      );
+    }
+    S.cityCount = n;
+    // maxIter を更新
+    let f = 1; for (let i = 2; i <= n - 1; i++) f *= i;
+    S.maxIter = Math.max(1, Math.round(Math.PI / 4 * Math.sqrt(f)));
+    document.getElementById('csvStatus').textContent =
+      '✅ ' + n + '都市 × ' + n + '列 を読み込みました（' + S.cityNames.join(', ') + '）';
+    render();
+  };
+  reader.readAsText(file);
+}
+
+function distInputHTML(names) {
+  // distMode に応じて距離入力UIを切り替える
+  const tabs = `<div class="chip-group" style="margin-bottom:12px;">
+    <div class="chip${S.distMode==='pair'?' selected':''}" onclick="S.distMode='pair';render()">ペア入力</div>
+    <div class="chip${S.distMode==='csv'?' selected':''}" onclick="S.distMode='csv';render()">CSV アップロード</div>
+    <div class="chip${S.distMode==='matrix'?' selected':''}" onclick="S.distMode='matrix';render()">行列入力</div>
+  </div>`;
+
+  if (S.distMode === 'pair') {
+    return tabs + `
+      <div class="hint" style="margin-bottom:10px;">
+        都市ペアごとに距離（km）を入力してください。A↔B と B↔A は同じ値として扱われます。
+      </div>
+      ${pairHTML(names)}`;
+  }
+
+  if (S.distMode === 'csv') {
+    return tabs + `
+      <div class="hint" style="margin-bottom:10px;">
+        距離行列を CSV ファイルで読み込みます。<br>
+        先頭行・先頭列に都市名を入れると自動で取り込みます（省略可）。<br>
+        対角成分は 0、値の単位は km を推奨します。
+      </div>
+      <div class="csv-upload-area" onclick="document.getElementById('csvFileInput').click()">
+        <div class="csv-upload-icon">📂</div>
+        <div class="csv-upload-text">クリックして CSV を選択<br><span style="font-size:11px;color:#aaa;">または drag &amp; drop</span></div>
+        <input type="file" id="csvFileInput" accept=".csv" style="display:none"
+          onchange="handleCsvUpload(this)">
+      </div>
+      <div id="csvStatus" style="font-size:12px;color:#16a34a;margin-top:8px;"></div>
+      <div class="hint" style="margin-top:10px;">
+        <strong>CSV 形式の例：</strong><br>
+        <code>,東京,大阪,名古屋</code><br>
+        <code>東京,0,510,350</code><br>
+        <code>大阪,510,0,180</code><br>
+        <code>名古屋,350,180,0</code>
+      </div>`;
+  }
+
+  // matrix モード（従来の行列入力）
+  return tabs + `
+    <div class="hint" style="margin-bottom:10px;">
+      各都市間の距離を直接入力します。対角成分（自分→自分）は 0 で固定です。
+    </div>
+    ${matrixHTML(names)}`;
+}
+
 function render() {
   renderProg();
   const content = STEP_CONTENT[S.step]();
@@ -436,6 +594,9 @@ function exportCfg() {
       .then(msg => alert(msg));
     return;
   }
+
+  // ペア入力モードの場合、送信前に行列を同期する
+  if (S.distMode === 'pair') syncPair();
 
   const cfg = {
     city_names: S.cityNames,
