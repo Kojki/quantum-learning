@@ -292,10 +292,11 @@ const STEP_CONTENT = [
         <div style="margin-top:10px;">
           <div class="slider-row">
             <input type="range" min="2" max="50" value="${S.cityCount}" step="1"
-              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>i<26?String.fromCharCode(65+i):String.fromCharCode(65+Math.floor((i-26)/26))+String.fromCharCode(65+(i-26)%26));S.distMatrix=[];let _f=1;for(let _i=2;_i<=S.cityCount-1;_i++)_f*=_i;S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(_f)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);">
+              oninput="S.cityCount=+this.value;S.cityNames=Array.from({length:S.cityCount},(_,i)=>i<26?String.fromCharCode(65+i):String.fromCharCode(65+Math.floor((i-26)/26))+String.fromCharCode(65+(i-26)%26));S.distMatrix=[];let _f=1;for(let _i=2;_i<=S.cityCount-1;_i++)_f*=_i;S.maxIter=Math.max(1,Math.round(Math.PI/4*Math.sqrt(_f)));document.getElementById('cntOut').textContent=this.value;document.getElementById('matrixArea').innerHTML=matrixHTML(S.cityNames);updateCityHint(S.cityCount);">
             <span class="slider-val" id="cntOut">${S.cityCount}</span>
           </div>
         </div>
+        <div id="cityHint" style="margin-top:10px;"></div>
       </div>
       <div class="field">
         <label>距離の入力方法</label>
@@ -575,6 +576,7 @@ function render() {
   </div>`;
   document.getElementById('stepContent').innerHTML = content + nav;
   updateSliderMax();
+  updateCityHint(S.cityCount);
 }
 
 function updateSliderMax() {
@@ -586,6 +588,45 @@ function updateSliderMax() {
   var sliderMax = Math.min(9999, Math.max(opt * 3, 50));
   el.max = sliderMax;
   if (S.maxIter > sliderMax) { S.maxIter = sliderMax; el.value = sliderMax; }
+}
+
+function updateCityHint(n) {
+  var el = document.getElementById('cityHint');
+  if (!el) return;
+
+  // 有効ルート数 = (n-1)!
+  var f = 1;
+  for (var i = 2; i <= n - 1; i++) f *= i;
+
+  // 最適反復回数
+  var rOpt = Math.max(1, Math.round(Math.PI / 4 * Math.sqrt(f)));
+
+  // 実用レベルの判定
+  var level, color, icon, timeGuide;
+  if (n <= 5) {
+    level = '実用範囲'; color = '#15803d'; icon = '✅';
+    timeGuide = '数秒〜数分で完了します。';
+  } else if (n <= 7) {
+    level = '許容範囲'; color = '#92400e'; icon = '⚠️';
+    timeGuide = '数分〜数十分かかる場合があります。';
+  } else if (n <= 9) {
+    level = '重い'; color = '#b45309'; icon = '⚠️';
+    timeGuide = '数十分〜数時間かかる場合があります。';
+  } else {
+    level = 'シミュレーター限界超え'; color = '#dc2626'; icon = '❌';
+    timeGuide = '古典シミュレーターでの実行は現実的ではありません。4〜6都市を推奨します。';
+  }
+
+  // ルート数を読みやすく整形
+  var routeStr = f.toLocaleString();
+
+  el.innerHTML = '<div style="border:1px solid ' + color + ';border-radius:8px;padding:10px 14px;background:' +
+    (n <= 5 ? '#f0fdf4' : n <= 7 ? '#fffbeb' : n <= 9 ? '#fff7ed' : '#fef2f2') + ';font-size:12px;line-height:1.7;">' +
+    '<strong style="color:' + color + '">' + icon + ' ' + level + '</strong><br>' +
+    '有効ルート数：(n−1)! = ' + routeStr + ' 通り<br>' +
+    '最適反復回数：R ≈ ' + rOpt.toLocaleString() + ' 回<br>' +
+    timeGuide +
+    '</div>';
 }
 
 function exportCfg() {
