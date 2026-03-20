@@ -287,9 +287,9 @@ def _plot_noise_comparison(
     # 棒グラフ（コスト）
     bars = ax1.bar(labels, costs, color=colors, alpha=0.75, width=0.5, label="Min Cost")
 
-    # 最適解マーク
+    # 最適解マーク（絵文字非対応環境のため ★ で代替）
     for bar, ok in zip(bars, optimals):
-        mark = "✓" if ok else "✗"
+        mark = "★" if ok else "✗"
         color = "#16a34a" if ok else "#dc2626"
         ax1.text(
             bar.get_x() + bar.get_width() / 2,
@@ -488,7 +488,7 @@ def _generate_html_report(
             return "<p>No history</p>"
         rows = "<tr><th>Iter</th><th>Cost</th><th>Route</th><th>Improved</th></tr>"
         for h in history:
-            mark = "★" if h.get("improved") else "—"
+            mark = "✓" if h.get("improved") else "—"
             color = "#16a34a" if h.get("improved") else "#888"
             rows += (
                 f"<tr><td>{h['iteration']}</td><td>{h['threshold']:.1f}</td>"
@@ -782,13 +782,22 @@ def main() -> None:
     # ── 座標取得 ──
     coords = None
     if cfg["use_geo"]:
-        print("\n座標を取得中...")
-        try:
-            coords = geocode_cities(cfg["city_names"])
-        except RuntimeError as e:
-            print(f"\n❌ 座標取得エラー: {e}")
-            sys.exit(1)
-        cfg["city_names"] = list(coords.keys())
+        # UIで確認済みの座標がある場合はそれを使用（ジオコーディングをスキップ）
+        ui_coords = cfg.get("coords")
+        if ui_coords and len(ui_coords) >= 2:
+            print("\n✅ UIで確認済みの座標を使用します。")
+            coords = {name: (c["lat"], c["lng"]) for name, c in ui_coords.items()}
+            cfg["city_names"] = list(coords.keys())
+        else:
+            # UI座標がなければジオコーディングを実行
+            print("\n座標を取得中...")
+            try:
+                coords = geocode_cities(cfg["city_names"])
+            except RuntimeError as e:
+                print(f"\n❌ 座標取得エラー: {e}")
+                sys.exit(1)
+            cfg["city_names"] = list(coords.keys())
+
         try:
             cfg["distance_matrix"], cfg["city_names"] = build_distance_matrix(coords)
         except Exception as e:

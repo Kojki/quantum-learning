@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import signal
 import sys
 from threading import Thread, Event
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 
 import config
 
@@ -23,12 +22,36 @@ def index():
     return render_template("grover_config_ui.html")
 
 
+@app.route("/geocode", methods=["POST"])
+def geocode():
+    """都市名リストの座標をジオコーディングして返す。
+    UIの座標確認ステップで使用する。
+    """
+    from geo.geocoder import geocode_cities
+
+    data = request.get_json()
+    city_names = data.get("city_names", [])
+    try:
+        coords = geocode_cities(city_names)
+        return jsonify(
+            {
+                "status": "ok",
+                "coords": {
+                    name: {"lat": lat, "lng": lng}
+                    for name, (lat, lng) in coords.items()
+                },
+                "failed": [n for n in city_names if n not in coords],
+            }
+        )
+    except RuntimeError as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route("/submit", methods=["POST"])
 def submit():
-    """Web UI（ステップ形式）から設定を受け取る。
-
-    gate_time_1q はデバイスプリセットから自動補完する。
-    """
+    """Web UI（ステップ形式）から設定を受け取る。"""
     global _cfg_result
     from quantum.noise import DEVICE_PRESETS
 
@@ -57,7 +80,6 @@ def submit_file():
 
 
 def _load_config_from_file() -> dict:
-    """config.py の設定をそのまま辞書として返す。"""
     from pathlib import Path
     from quantum.noise import DEVICE_PRESETS
 
@@ -83,16 +105,11 @@ def _load_config_from_file() -> dict:
 
 
 def get_config_from_web() -> dict:
-    """Flask サーバーを起動し、Web UI から設定が届くまで待機して返す。
-
-    Ctrl+C を受け取った場合はプロセスを終了する。
-    """
     global _cfg_result
     _cfg_result = None
     _cfg_ready.clear()
 
     def _run_server() -> None:
-        # Flask の開発サーバーログを最小限に抑える
         import logging
 
         log = logging.getLogger("werkzeug")
@@ -106,8 +123,6 @@ def get_config_from_web() -> dict:
     print("設定完了後『コードを生成』ボタンを押してください。")
     print("中断する場合は Ctrl+C を押してください。\n")
 
-    # Ctrl+C でブロックを解除してプロセスを終了できるよう
-    # タイムアウト付きのポーリングループで待機する
     try:
         while not _cfg_ready.is_set():
             _cfg_ready.wait(timeout=0.5)

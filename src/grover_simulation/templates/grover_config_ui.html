@@ -115,6 +115,18 @@ config.py と同じ形式の設定辞書を返す。
   .csv-upload-icon { font-size: 28px; margin-bottom: 8px; }
   .csv-upload-text { font-size: 13px; color: #555; line-height: 1.6; }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  .map-container { border-radius: 8px; overflow: hidden; border: 1px solid #e0e0e0; margin-top: 10px; }
+  .coord-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+  .coord-item:last-child { border-bottom: none; }
+  .coord-city { font-weight: 500; min-width: 80px; color: #1a1a2e; }
+  .coord-val { font-family: monospace; font-size: 12px; color: #555; flex: 1; }
+  .coord-warn { color: #dc2626; font-size: 12px; }
+  .coord-ok { color: #16a34a; font-size: 12px; }
+  .geocode-loading { text-align: center; padding: 2rem; color: #666; font-size: 13px; }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -122,7 +134,10 @@ config.py と同じ形式の設定辞書を返す。
   <div id="stepContent"></div>
 </div>
 <script>
-const STEPS = ['問題の種類', '都市設定', 'シミュレーション', '可視化', '確認'];
+const STEPS_GEO  = ['問題の種類', '都市設定', '座標確認', 'シミュレーション', '可視化', '確認'];
+const STEPS_NOGEO = ['問題の種類', '都市設定', 'シミュレーション', '可視化', '確認'];
+// 現在有効なステップリスト（use_geo に応じて切り替え）
+function getSteps() { return S.useGeo ? STEPS_GEO : STEPS_NOGEO; }
 const SAMPLES = {
   '1': { label: '日本の主要都市', cities: ['東京', '大阪', '名古屋', '福岡'], useGeo: true },
   '2': { label: 'ヨーロッパの主要都市', cities: ['London', 'Paris', 'Berlin', 'Rome'], useGeo: true },
@@ -165,7 +180,7 @@ let S = {
   step: 0, configMode: 'interactive', cityMode: 'sample', sampleId: '1',
   cityCount: 4, cityNames: ['東京', '大阪', '名古屋', '福岡'], useGeo: true, distMatrix: [],
   maxIter: 2, shots: 1024, ancilla: 'single', noise: 'ideal', device: 'eagle_r3',
-  distMode: 'pair', seed: 42, outputDir: 'output'
+  distMode: 'pair', coords: {}, geocodeDone: false, seed: 42, outputDir: 'output'
 };
  
 function chip(group, val, label, onchange) {
@@ -231,7 +246,8 @@ function matrixNav(e, row, col, n) {
 }
  
 function renderProg() {
-  document.getElementById('progBar').innerHTML = STEPS.map((label,i)=>`
+  const steps = getSteps();
+  document.getElementById('progBar').innerHTML = steps.map((label,i)=>`
     <div class="prog-step ${i<S.step?'done':i===S.step?'active':''}">
       <div class="prog-circle">${i<S.step?'&#10003;':i+1}</div>
       <span class="prog-label">${label}</span>
@@ -263,6 +279,140 @@ function deviceGrid() {
   </div>`;
 }
  
+// 座標確認ステップのコンテンツ
+function geoConfirmStep() {
+  if (!S.geocodeDone) {
+    // まだジオコーディングしていない → ローディング表示してAPI呼び出し
+    setTimeout(() => {
+      document.getElementById('geocodeArea').innerHTML =
+        '<div class="geocode-loading">🔍 座標を取得中...</div>';
+      fetch('/geocode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({city_names: S.cityNames})
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          S.coords = data.coords;
+          S.geocodeDone = true;
+          // failed があれば警告
+          if (data.failed && data.failed.length > 0) {
+            S._geoFailed = data.failed;
+          }
+          renderGeoResult();
+        } else {
+          document.getElementById('geocodeArea').innerHTML =
+            '<div class="alert-warn"><span class="alert-warn-icon">⚠️</span><div>' + data.message + '</div></div>';
+        }
+      })
+      .catch(e => {
+        document.getElementById('geocodeArea').innerHTML =
+          '<div class="alert-warn"><span class="alert-warn-icon">⚠️</span><div>取得に失敗しました: ' + e + '</div></div>';
+      });
+    }, 100);
+    return `
+      <h2>座標確認</h2>
+      <p class="step-desc">地名から座標を自動取得しています。取得後に位置を確認・修正できます。</p>
+      <div id="geocodeArea"><div class="geocode-loading">準備中...</div></div>`;
+  }
+  return `
+    <h2>座標確認</h2>
+    <p class="step-desc">取得した座標を地図で確認してください。マーカーをドラッグして位置を修正できます。</p>
+    <div id="geocodeArea">${buildGeoHTML()}</div>`;
+}
+
+function buildGeoHTML() {
+  const failed = S._geoFailed || [];
+  let failedHtml = failed.length > 0
+    ? '<div class="alert-warn" style="margin-bottom:10px;"><span class="alert-warn-icon">⚠️</span><div>取得できなかった地名: ' + failed.join(', ') + '<br>これらの都市は除外されます。</div></div>'
+    : '';
+
+  let coordList = Object.entries(S.coords).map(([name, c]) =>
+    '<div class="coord-item">' +
+    '<span class="coord-city">' + name + '</span>' +
+    '<span class="coord-val" id="coord_' + name + '">' + c.lat.toFixed(4) + ', ' + c.lng.toFixed(4) + '</span>' +
+    '<span class="coord-ok">✓</span>' +
+    '</div>'
+  ).join('');
+
+  return failedHtml +
+    '<div class="field"><label>取得された座標</label>' +
+    '<div style="margin:6px 0;">' + coordList + '</div></div>' +
+    '<div class="field"><label>地図で確認・修正</label>' +
+    '<div class="hint" style="margin-bottom:6px;">マーカーをドラッグすると座標が更新されます。</div>' +
+    '<div class="map-container"><div id="leafletMap" style="height:380px;"></div></div></div>' +
+    '<div style="margin-top:10px;">' +
+    '<button class="btn-back" onclick="S.geocodeDone=false;S.coords={};S._geoFailed=[];render()">再取得</button>' +
+    '</div>';
+}
+
+function renderGeoResult() {
+  const area = document.getElementById('geocodeArea');
+  if (!area) return;
+  area.innerHTML = buildGeoHTML();
+  // Leaflet 地図を初期化
+  setTimeout(initLeafletMap, 50);
+}
+
+function initLeafletMap() {
+  const coords = S.coords;
+  const names = Object.keys(coords);
+  if (names.length === 0) return;
+
+  // 既存の地図インスタンスを破棄
+  if (window._leafletMap) {
+    window._leafletMap.remove();
+    window._leafletMap = null;
+  }
+
+  // 中心座標を平均で計算
+  const avgLat = names.reduce((s, n) => s + coords[n].lat, 0) / names.length;
+  const avgLng = names.reduce((s, n) => s + coords[n].lng, 0) / names.length;
+
+  const map = L.map('leafletMap').setView([avgLat, avgLng], 5);
+  window._leafletMap = map;
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 18,
+  }).addTo(map);
+
+  // マーカーを追加（ドラッグ可能）
+  names.forEach(name => {
+    const c = coords[name];
+    const marker = L.marker([c.lat, c.lng], {draggable: true})
+      .addTo(map)
+      .bindTooltip(name, {permanent: true, direction: 'top', offset: [0, -10]});
+
+    marker.on('dragend', function(e) {
+      const pos = e.target.getLatLng();
+      S.coords[name] = {lat: pos.lat, lng: pos.lng};
+      const el = document.getElementById('coord_' + name);
+      if (el) el.textContent = pos.lat.toFixed(4) + ', ' + pos.lng.toFixed(4);
+    });
+  });
+
+  // 全マーカーが見えるようにフィット
+  if (names.length > 1) {
+    const bounds = L.latLngBounds(names.map(n => [coords[n].lat, coords[n].lng]));
+    map.fitBounds(bounds, {padding: [40, 40]});
+  }
+}
+
+function getStepContent(step) {
+  const steps = getSteps();
+  const label = steps[step];
+  // 座標確認ステップ（use_geo=true のとき挿入される）
+  if (label === '座標確認') return geoConfirmStep();
+  // それ以外は STEP_CONTENT 配列のインデックスに変換して呼ぶ
+  // STEP_CONTENT: [0=問題の種類, 1=都市設定, 2=シミュレーション, 3=可視化, 4=確認]
+  const labelToIdx = {'問題の種類':0,'都市設定':1,'シミュレーション':2,'可視化':3,'確認':4};
+  const idx = labelToIdx[label];
+  if (idx === undefined || !STEP_CONTENT[idx]) return '<p>不明なステップです。</p>';
+  return STEP_CONTENT[idx]();
+}
+
 const STEP_CONTENT = [
   () => `
     <h2>Grover シミュレーター</h2>
@@ -417,7 +567,7 @@ const STEP_CONTENT = [
   () => {
     const rows = [
       ['都市', S.cityNames.join(', ')],
-      ['距離設定', S.useGeo?'座標から自動取得':'手動入力'],
+      ['距離設定', S.useGeo ? (S.geocodeDone ? '座標取得済み (' + Object.keys(S.coords).length + '都市)' : '座標自動取得（未確認）') : '手動入力'],
       ['最大反復回数', S.maxIter + ' 回'],
       ['ショット数', S.shots.toLocaleString()],
       ['Ancilla モード', S.ancilla],
@@ -566,13 +716,24 @@ function distInputHTML(names) {
 
 function render() {
   renderProg();
-  const content = STEP_CONTENT[S.step]();
-  const isLast = S.step === STEPS.length - 1;
+  const content = getStepContent(S.step);
+  const isLast = S.step === getSteps().length - 1;
   const nav = `<div class="nav">
     ${S.step>0?`<button class="btn-back" onclick="S.step--;render()">戻る</button>`:'<div></div>'}
     ${isLast
       ? `<button class="btn-export" onclick="exportCfg()">コードを生成</button>`
-      : `<button class="btn-next" onclick="S.step++;render()">次へ</button>`}
+      : `<button class="btn-next" onclick="
+  const nextStep = S.step + 1;
+  const steps = getSteps();
+  // 都市設定 → 座標確認 に進むとき、都市名変更に備えてリセット
+  if (S.useGeo && steps[S.step] === '都市設定' && steps[nextStep] === '座標確認') {
+    S.geocodeDone = false;
+    S.coords = {};
+    S._geoFailed = [];
+  }
+  S.step++;
+  render();
+">次へ</button>`}
   </div>`;
   document.getElementById('stepContent').innerHTML = content + nav;
   updateSliderMax();
@@ -667,6 +828,7 @@ function exportCfg() {
     noise_model: S.noise,
     device: S.device,
     seed: S.seed,
+    coords: S.useGeo ? S.coords : null,
     output_dir: S.outputDir||null
   };
 

@@ -1,22 +1,84 @@
 """地名から緯度経度を取得するモジュール。
 
 geopy の Nominatim（OpenStreetMap ベース）を使用する。
-API の利用規約により、連続リクエストの間に待機時間を設ける。
-
-使い方::
-
-    from geo.geocoder import geocode_cities
-
-    coords = geocode_cities(["福岡", "大阪", "東京", "札幌"])
-    # → {"福岡": (33.5902, 130.4017), "大阪": (34.6937, 135.5023), ...}
+countrycodes パラメータは geopy バージョンによって非対応のため、
+クエリ文字列に国名を付加する方式で検索精度を向上させる。
 """
 
 from __future__ import annotations
-
 import time
-
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+
+
+# ---------------------------------------------------------------------------
+# 国推定・クエリ組み立て
+# ---------------------------------------------------------------------------
+
+
+def _contains_japanese(text: str) -> bool:
+    """文字列に日本語（CJK）が含まれるか判定する。"""
+    return any("\u3000" <= c <= "\u9fff" or "\uff00" <= c <= "\uffef" for c in text)
+
+
+# 地名キーワード → 付加する国名サフィックス
+_COUNTRY_SUFFIX: dict[str, str] = {
+    # 日本語キーワード
+    "東京": ", Japan",
+    "大阪": ", Japan",
+    "名古屋": ", Japan",
+    "福岡": ", Japan",
+    "札幌": ", Japan",
+    "仙台": ", Japan",
+    "広島": ", Japan",
+    "京都": ", Japan",
+    "神戸": ", Japan",
+    "横浜": ", Japan",
+    "川崎": ", Japan",
+    "さいたま": ", Japan",
+    "市": ", Japan",
+    "区": ", Japan",
+    "町": ", Japan",
+    "村": ", Japan",
+    "県": ", Japan",
+    # 欧米の都市
+    "London": ", UK",
+    "Paris": ", France",
+    "Berlin": ", Germany",
+    "Rome": ", Italy",
+    "Madrid": ", Spain",
+    "Vienna": ", Austria",
+    "Amsterdam": ", Netherlands",
+    "Brussels": ", Belgium",
+    "New York": ", USA",
+    "Los Angeles": ", USA",
+    "Chicago": ", USA",
+    "Tokyo": ", Japan",
+    "Osaka": ", Japan",
+    "Kyoto": ", Japan",
+}
+
+
+def _build_query(name: str) -> str:
+    """地名に国名サフィックスを付加して検索精度を向上させる。
+
+    例: 「東京」→「東京, Japan」
+    """
+    # 日本語を含む場合は Japan を付加
+    if _contains_japanese(name):
+        # すでに国名が含まれていれば付加しない
+        if "Japan" not in name and "日本" not in name:
+            return f"{name}, Japan"
+        return name
+
+    # キーワードテーブルで検索
+    for keyword, suffix in _COUNTRY_SUFFIX.items():
+        if keyword in name:
+            if suffix.strip(", ") not in name:
+                return f"{name}{suffix}"
+            return name
+
+    return name
 
 
 # ---------------------------------------------------------------------------
@@ -32,55 +94,58 @@ def geocode_cities(
 ) -> dict[str, tuple[float, float]]:
     """都市名のリストから緯度経度を取得する。
 
-    Nominatim の利用規約により、リクエスト間に最低 1 秒の待機を設ける。
-
-    Args:
-        city_names: 地名のリスト（日本語・英語どちらでも可）。
-        language: 検索に使う言語（デフォルト: 日本語）。
-        timeout: タイムアウト秒数。
-        wait_sec: リクエスト間の待機時間（秒）。1.0 以上を推奨。
+    検索クエリに国名を付加して精度を向上させる。
+    見つからない場合は元の地名でフォールバック検索する。
 
     Returns:
-        ``{地名: (緯度, 経度)}`` の辞書。
-        取得できなかった地名はスキップされる。
+        {地名: (緯度, 経度)} の辞書。
 
     Raises:
-        RuntimeError: 取得できた都市が2件未満の場合
-                      （VRP は最低2都市必要なため）。
+        RuntimeError: 取得できた都市が2件未満の場合。
     """
-    geolocator = Nominatim(
-        user_agent="grover_simulation_tsp",
-        timeout=timeout,
-    )
+    geolocator = Nominatim(user_agent="grover_simulation_tsp", timeout=timeout)
 
     coords: dict[str, tuple[float, float]] = {}
     failed: list[str] = []
 
     for name in city_names:
+        query = _build_query(name)
+        located = False
+
         try:
-            location = geolocator.geocode(name, language=language)
+            # 国名付きクエリで検索
+            location = geolocator.geocode(query, language=language)
+
+            # 見つからなければ元の地名でフォールバック
+            if location is None and query != name:
+                print(f"  ↩  '{query}' で見つからず、'{name}' で再検索...")
+                location = geolocator.geocode(name, language=language)
+
             if location is not None:
                 coords[name] = (location.latitude, location.longitude)
+                addr = location.address
+                addr_short = addr[:70] + ("..." if len(addr) > 70 else "")
                 print(
                     f"  取得成功: {name} → ({location.latitude:.4f}, {location.longitude:.4f})"
                 )
-            else:
-                print(f"  ⚠️  見つかりませんでした: {name}")
-                failed.append(name)
+                print(f"           [{addr_short}]")
+                located = True
+
         except GeocoderTimedOut:
-            print(f"  ⚠️  タイムアウト: {name}（接続が遅い可能性があります）")
-            failed.append(name)
+            print(f"  ⚠️  タイムアウト: {name}")
         except GeocoderServiceError as e:
             print(f"  ⚠️  サービスエラー: {name} ({e})")
-            failed.append(name)
         except Exception as e:
             print(f"  ⚠️  予期しないエラー: {name} ({type(e).__name__}: {e})")
+
+        if not located:
+            print(f"  ⚠️  見つかりませんでした: {name}")
             failed.append(name)
 
         time.sleep(wait_sec)
 
     if failed:
-        print(f"\n  以下の地名は取得できませんでした: {failed}")
+        print(f"\n  取得できなかった地名: {failed}")
 
     if len(coords) < 2:
         raise RuntimeError(
