@@ -35,6 +35,7 @@ from visualizer.core import (
     make_bar_labels,
     make_bar_colors,
     make_frame_title,
+    make_axis_labels,
     save_or_show,
 )
 
@@ -98,6 +99,7 @@ def run(
     seed: int = 42,
     save_path: str | Path | None = None,
     fps: int = 2,
+    target_bitstrings: list[str] | None = None,
 ) -> None:
     """古典 vs 量子の探索レースアニメーションを表示・保存する。
 
@@ -113,6 +115,7 @@ def run(
         seed: 古典探索の乱数シード。
         save_path: 保存先パス（.gif）。省略時はウィンドウ表示。
         fps: アニメーションのフレームレート（ステップ/秒）。
+        target_bitstrings: 正解のビット列リスト。指定時は threshold から計算せずこれを使用。
 
     Raises:
         ValueError: 条件を満たす解が存在しない場合。
@@ -133,7 +136,15 @@ def run(
         feasibility_fn=problem.is_feasible,
     )
     oracle = build_oracle(n_qubits, condition)
-    target_bitstrings = _enumerate_targets(n_qubits, condition)
+
+    # target_bitstrings が外から渡された場合はそれを使う（浮動小数点誤差対策）
+    if target_bitstrings is None:
+        target_bitstrings = _enumerate_targets(n_qubits, condition)
+    else:
+        print(
+            f"  [state_plotter] target_bitstrings を直接受け取りました: {len(target_bitstrings)} 件"
+        )
+
     n_iterations = optimal_iterations(n_qubits, len(target_bitstrings))
 
     # 量子：各反復後の観測確率を取得
@@ -166,6 +177,9 @@ def run(
     # 最大試行回数（左パネルの y 軸スケール用）
     max_trials = max(max(step.values()) for step in classical_history if step)
 
+    # X軸ラベル（ルート名に変換）
+    tick_indices, tick_labels = make_axis_labels(labels, problem)
+
     # 色の準備
     colors_classical = make_bar_colors(labels, target_bitstrings, "#adb5bd")
     colors_quantum = make_bar_colors(labels, target_bitstrings, COLOR_NOISY)
@@ -180,11 +194,11 @@ def run(
     def _setup_ax(ax, title: str, ylabel: str, ylim: float):
         ax.set_facecolor("#f8f9fa")
         ax.set_title(title, fontsize=11)
-        ax.set_xlabel("ビット列", fontsize=9)
+        ax.set_xlabel("ルート", fontsize=9)
         ax.set_ylabel(ylabel, fontsize=9)
         ax.set_ylim(0, ylim)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7)
+        ax.set_xticks(tick_indices)
+        ax.set_xticklabels(tick_labels, rotation=45, ha="right", fontsize=7)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
 

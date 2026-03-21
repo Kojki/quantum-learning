@@ -19,24 +19,22 @@ import matplotlib.ticker as ticker
 import matplotlib.font_manager as fm
 
 
-# 日本語フォントの設定（環境に応じてフォールバック）
 def _setup_fonts():
     candidates = [
         "MS Gothic",
         "Yu Gothic",
-        "Meiryo",  # Windows
+        "Meiryo",
         "Hiragino Sans",
-        "Hiragino Kaku Gothic Pro",  # macOS
+        "Hiragino Kaku Gothic Pro",
         "Noto Sans CJK JP",
         "IPAexGothic",
-        "IPAGothic",  # Linux
+        "IPAGothic",
     ]
     available = {f.name for f in fm.fontManager.ttflist}
     for font in candidates:
         if font in available:
             plt.rcParams["font.family"] = font
             return
-    # フォールバック: 日本語を英語に切り替えるため何もしない
 
 
 _setup_fonts()
@@ -53,7 +51,9 @@ from quantum.noise import (
     build_readout_model,
 )
 from benchmark.metrics import compare
+from visualizer.amplitude_visualizer import run as run_amplitude
 from visualizer.animation import run as run_animation
+from visualizer.bloch_visualizer import run as run_bloch
 from visualizer.circuit_drawer import draw_circuits
 from visualizer.state_plotter import run as run_race
 from geo.geocoder import geocode_cities
@@ -156,7 +156,6 @@ def _print_result(label: str, result: dict, top_k: int = 5) -> None:
 def _save_result(
     output_dir: Path, bf_result: dict, grover_result: dict, cfg: dict
 ) -> None:
-    """実行結果を JSON ファイルに保存する。"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     noise = cfg.get("noise_model", "unknown")
     filename = output_dir / f"result_{noise}_{timestamp}.json"
@@ -172,7 +171,7 @@ def _save_result(
 
 
 # ---------------------------------------------------------------------------
-# 成功率グラフ（反復回数 vs 正解確率）
+# 成功率グラフ
 # ---------------------------------------------------------------------------
 
 
@@ -184,7 +183,6 @@ def _plot_success_rate(
     noise_label: str,
     save_path: Path | None,
 ) -> None:
-    """反復回数 1〜R_max での正解確率の推移を折れ線グラフで保存する。"""
     n = problem.n_cities
     factorial = math.factorial(n - 1)
     r_opt = max(1, round(math.pi / 4 * math.sqrt(factorial)))
@@ -195,7 +193,6 @@ def _plot_success_rate(
 
     print(f"  成功率グラフ生成中（1〜{r_max}反復）...")
     for r in iterations:
-        # best_cost+epsilon をしきい値にして「best_cost 以下の解」を正解とみなす
         eps = max(1.0, best_cost * 1e-6) if best_cost > 0 else 1.0
         result = grover_solve(
             problem=problem,
@@ -205,10 +202,6 @@ def _plot_success_rate(
             noise_model=noise_model,
         )
         if result.get("status") == "ok" and result.get("top_k"):
-            # 正解ビット列の確率を合計
-            # best_bitstring が一致するものを正解とみなす
-            best_bs = result.get("best_bitstring", "")
-            # feasible かつコストが best_cost 以下のものを正解とする
             success_prob = 0.0
             for e in result["top_k"]:
                 bs = e.get("bitstring", "")
@@ -257,13 +250,12 @@ def _plot_success_rate(
 # ノイズモデル比較可視化
 # ---------------------------------------------------------------------------
 
-# ノイズモデルごとの色
 _NOISE_COLORS = {
-    "ideal": "#2563eb",  # 青
-    "depol": "#d97706",  # 橙
-    "thermal": "#16a34a",  # 緑
-    "readout": "#9333ea",  # 紫
-    "combined": "#dc2626",  # 赤
+    "ideal": "#2563eb",
+    "depol": "#d97706",
+    "thermal": "#16a34a",
+    "readout": "#9333ea",
+    "combined": "#dc2626",
 }
 
 
@@ -272,12 +264,6 @@ def _plot_noise_comparison(
     bf_best_cost: float,
     output_dir: Path | None,
 ) -> None:
-    """ノイズモデル別の比較棒グラフを生成する。
-
-    左軸：最小コスト（棒グラフ）
-    右軸：実行時間（折れ線）
-    古典の最適コストを水平破線で表示
-    """
     valid = [r for r in comparison_rows if r["best_cost"] is not None]
     if not valid:
         print("  ⚠️  比較グラフ: 有効なデータがありません。")
@@ -290,11 +276,7 @@ def _plot_noise_comparison(
     colors = [_NOISE_COLORS.get(l, "#888888") for l in labels]
 
     fig, ax1 = plt.subplots(figsize=(9, 5))
-
-    # 棒グラフ（コスト）
     bars = ax1.bar(labels, costs, color=colors, alpha=0.75, width=0.5, label="Min Cost")
-
-    # 最適解マーク（絵文字非対応環境のため ★ で代替）
     for bar, ok in zip(bars, optimals):
         mark = "★" if ok else "✗"
         color = "#16a34a" if ok else "#dc2626"
@@ -308,8 +290,6 @@ def _plot_noise_comparison(
             color=color,
             fontweight="bold",
         )
-
-    # 古典の最適コストを破線で表示
     ax1.axhline(
         bf_best_cost,
         color="#374151",
@@ -322,7 +302,6 @@ def _plot_noise_comparison(
     ax1.set_xlabel("Noise Model")
     ax1.set_title("Noise Model Comparison: Min Cost & Elapsed Time")
 
-    # 折れ線グラフ（実行時間）を右軸に
     ax2 = ax1.twinx()
     ax2.plot(
         labels,
@@ -337,11 +316,9 @@ def _plot_noise_comparison(
     ax2.set_ylabel("Elapsed Time (s)")
     ax2.set_ylim(0, max(times) * 1.4 if max(times) > 0 else 1)
 
-    # 凡例を統合
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
     ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", fontsize=9)
-
     fig.tight_layout()
 
     if output_dir:
@@ -360,17 +337,10 @@ def _plot_success_rate_comparison(
     cfg: dict,
     output_dir: Path | None,
 ) -> None:
-    """全ノイズモデルの成功率を1枚のグラフに重ねて表示する。
-
-    横軸：Grover 反復回数
-    縦軸：正解確率
-    各ノイズモデルを異なる色の折れ線で表示
-    最適反復回数を縦破線で表示
-    """
     n = problem.n_cities
     factorial = math.factorial(n - 1)
     r_opt = max(1, round(math.pi / 4 * math.sqrt(factorial)))
-    r_max = min(r_opt * 3, 30)  # 一括比較なので上限を抑える
+    r_max = min(r_opt * 3, 30)
     iterations = list(range(1, r_max + 1))
 
     fig, ax = plt.subplots(figsize=(10, 5))
@@ -448,7 +418,6 @@ def _plot_success_rate_comparison(
 
 
 def _img_to_base64(path) -> str | None:
-    """画像ファイルを Base64 文字列に変換する。"""
     if path is None or not path.exists():
         return None
     with open(path, "rb") as f:
@@ -458,7 +427,6 @@ def _img_to_base64(path) -> str | None:
 def _generate_html_report(
     cfg, bf_result, grover_result, comparison_rows, output_dir
 ) -> None:
-    """実行結果をまとめた HTML レポートを生成する。グラフ画像は Base64 で埋め込む。"""
     if output_dir is None:
         return
 
@@ -470,6 +438,15 @@ def _generate_html_report(
         if b64 is None:
             return f'<p style="color:#888;">({alt} not generated)</p>'
         return f'<img src="data:image/png;base64,{b64}" alt="{alt}" style="width:{width};border-radius:8px;border:1px solid #e0e0e0;">'
+
+    def gif_tag(filename, alt):
+        path = output_dir / filename
+        if not path.exists():
+            return f'<p style="color:#888;">({alt} not generated)</p>'
+        b64 = _img_to_base64(path)
+        if b64 is None:
+            return f'<p style="color:#888;">({alt} not generated)</p>'
+        return f'<img src="data:image/gif;base64,{b64}" alt="{alt}" style="width:100%;border-radius:8px;border:1px solid #e0e0e0;">'
 
     def matrix_table():
         dm = cfg.get("distance_matrix", [])
@@ -533,7 +510,6 @@ def _generate_html_report(
     for i in range(2, n_cities):
         n_routes *= i
 
-    # 通常モードの量子結果セクション
     quantum_section = ""
     if grover_result and grover_result.get("status") == "ok":
         q_cost = grover_result.get("best_cost", 0)
@@ -558,7 +534,6 @@ def _generate_html_report(
             f'<section><h2>Success Rate</h2>{img_tag("success_rate.png","Success Rate Graph","80%")}</section>'
         )
 
-    # 比較モードのセクション
     comparison_section = ""
     if comparison_rows:
         comparison_section = (
@@ -605,10 +580,6 @@ def _generate_html_report(
     gen_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     device_str = cfg.get("device", "—")
     dist_str = "Geocoded" if cfg.get("use_geo") else "Manual"
-    shots_str = str(cfg.get("shots", "—"))
-    max_it_str = str(cfg.get("max_iterations", "—"))
-    anc_str = cfg.get("ancilla_mode", "—")
-    seed_str = str(cfg.get("seed", "—"))
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -630,10 +601,10 @@ def _generate_html_report(
       <div class="kv"><span>Cities</span><strong>{cities_str}</strong></div>
       <div class="kv"><span>City Count</span><strong>{n_cities}</strong></div>
       <div class="kv"><span>Valid Routes (n-1)!</span><strong>{n_routes:,}</strong></div>
-      <div class="kv"><span>Shots</span><strong>{shots_str}</strong></div>
-      <div class="kv"><span>Max Iterations</span><strong>{max_it_str}</strong></div>
-      <div class="kv"><span>Ancilla Mode</span><strong>{anc_str}</strong></div>
-      <div class="kv"><span>Seed</span><strong>{seed_str}</strong></div>
+      <div class="kv"><span>Shots</span><strong>{cfg.get("shots","—")}</strong></div>
+      <div class="kv"><span>Max Iterations</span><strong>{cfg.get("max_iterations","—")}</strong></div>
+      <div class="kv"><span>Ancilla Mode</span><strong>{cfg.get("ancilla_mode","—")}</strong></div>
+      <div class="kv"><span>Seed</span><strong>{cfg.get("seed","—")}</strong></div>
       <div class="kv"><span>Distance Input</span><strong>{dist_str}</strong></div>
     </div>
     <h3>Distance Matrix (km)</h3>
@@ -660,22 +631,20 @@ def _generate_html_report(
     <h3>Overview (1 iteration)</h3>
     {img_tag("circuit_overview.png", "Circuit Overview")}
     <div class="two-col" style="margin-top:1rem;">
-      <div>
-        <h3>Oracle</h3>
-        {img_tag("circuit_oracle.png", "Oracle Circuit")}
-      </div>
-      <div>
-        <h3>Diffusion</h3>
-        {img_tag("circuit_diffusion.png", "Diffusion Circuit")}
-      </div>
+      <div><h3>Oracle</h3>{img_tag("circuit_oracle.png", "Oracle Circuit")}</div>
+      <div><h3>Diffusion</h3>{img_tag("circuit_diffusion.png", "Diffusion Circuit")}</div>
     </div>
   </section>
   <section>
     <h2>Animations</h2>
     <div class="two-col">
-      <div><h3>Grover Probability</h3><p style="font-size:0.85rem;color:#555;">grover_animation.gif</p></div>
-      <div><h3>Classical vs Quantum</h3><p style="font-size:0.85rem;color:#555;">classical_vs_quantum.gif</p></div>
+      <div><h3>Grover Probability</h3>{gif_tag("grover_animation.gif","Grover Animation")}</div>
+      <div><h3>Classical vs Quantum</h3>{gif_tag("classical_vs_quantum.gif","Classical vs Quantum")}</div>
     </div>
+    <h3 style="margin-top:1rem;">Amplitude bar chart</h3>
+    {gif_tag("amplitude_animation.gif","Amplitude Animation")}
+    <h3 style="margin-top:1rem;">Bloch Sphere Trajectories</h3>
+    {gif_tag("bloch_animation.gif","Bloch Sphere Animation")}
   </section>
 </div>
 </body>
@@ -698,7 +667,6 @@ def _run_noise_comparison(
     bf_result: dict,
     output_dir: Path | None,
 ) -> None:
-    """全ノイズモデルを一括実行し、結果を比較表示・保存する。"""
     print(f"\n{'=' * 50}")
     print("  ノイズモデル一括比較")
     print(f"{'=' * 50}")
@@ -748,7 +716,6 @@ def _run_noise_comparison(
             }
         comparison_rows.append(row)
 
-    # 比較表を表示
     print(
         f"\n  {'ノイズモデル':<12} {'最小コスト':>10} {'最適解':>6} {'実行時間':>10} {'Grover呼出':>10}"
     )
@@ -773,7 +740,6 @@ def _run_noise_comparison(
             json.dump(comparison_rows, f, ensure_ascii=False, indent=2, default=str)
         print(f"\n  比較結果を保存しました: {save_path.name}")
 
-    # ── 比較グラフの生成 ──
     bf_cost = bf_result.get("best_cost", 0) if bf_result.get("status") == "ok" else 0
     print("\n  比較棒グラフを生成中...")
     try:
@@ -801,17 +767,14 @@ def main() -> None:
     random.seed(cfg["seed"])
     np.random.seed(cfg["seed"])
 
-    # ── 座標取得 ──
     coords = None
     if cfg["use_geo"]:
-        # UIで確認済みの座標がある場合はそれを使用（ジオコーディングをスキップ）
         ui_coords = cfg.get("coords")
         if ui_coords and len(ui_coords) >= 2:
             print("\n✅ UIで確認済みの座標を使用します。")
             coords = {name: (c["lat"], c["lng"]) for name, c in ui_coords.items()}
             cfg["city_names"] = list(coords.keys())
         else:
-            # UI座標がなければジオコーディングを実行
             print("\n座標を取得中...")
             try:
                 coords = geocode_cities(cfg["city_names"])
@@ -826,12 +789,10 @@ def main() -> None:
             print(f"\n❌ 距離行列の構築に失敗しました: {e}")
             sys.exit(1)
 
-    # ── 都市数チェック ──
     if len(cfg.get("city_names", [])) < 2:
         print("❌ 都市数が不足しています（最低2都市必要です）。")
         sys.exit(1)
 
-    # ── 距離行列の検証・補完 ──
     dm = cfg.get("distance_matrix", [])
     DEFAULT_DIST = 10.0
     if dm:
@@ -849,7 +810,6 @@ def main() -> None:
             print("   正確な距離を使いたい場合は UI で入力し直してください。\n")
         cfg["distance_matrix"] = dm
 
-    # ── 問題の生成 ──
     try:
         problem = VehicleRoutingProblem(
             distance_matrix=cfg["distance_matrix"],
@@ -863,17 +823,14 @@ def main() -> None:
     print(problem.describe())
     print(f"\nノイズモデル     : {cfg['noise_model']}")
 
-    # ── 出力ディレクトリの準備 ──
     output_dir = Path(cfg["output_dir"]) if cfg.get("output_dir") else None
     if output_dir is not None:
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             print(f"\n⚠️  出力ディレクトリの作成に失敗しました: {e}")
-            print("   ウィンドウ表示のみで続行します。")
             output_dir = None
 
-    # ── 古典（全探索） ──
     bf_result = bf_solve(problem)
     _print_result("古典（全探索）", bf_result)
 
@@ -881,7 +838,6 @@ def main() -> None:
     if cfg["noise_model"] == "all":
         comparison_rows = _run_noise_comparison(problem, cfg, bf_result, output_dir)
 
-        # 古典の最適ルートで地図を生成
         if bf_result.get("status") == "ok":
             print("\nルートマップを生成中...")
             try:
@@ -903,7 +859,6 @@ def main() -> None:
             except Exception as e:
                 print(f"  ⚠️  地図描画に失敗しました: {e}")
 
-        # HTMLレポート生成
         if output_dir:
             print("\nHTMLレポートを生成中...")
             try:
@@ -911,7 +866,6 @@ def main() -> None:
             except Exception as e:
                 print(f"  ⚠️  レポート生成に失敗しました: {e}")
 
-        # 回路図（問題依存・ノイズ非依存なので all モードでも生成）
         print("\n回路図を生成中...")
         try:
             draw_circuits(
@@ -967,7 +921,6 @@ def main() -> None:
     print("\nルートマップを生成中...")
     try:
         if coords is not None:
-            # use_geo=True: 実座標 + OpenStreetMap 背景
             plot_route(
                 coords=coords,
                 best_route=grover_result["best_route"],
@@ -975,7 +928,6 @@ def main() -> None:
                 save_path=output_dir / "route_map.png" if output_dir else None,
             )
         else:
-            # use_geo=False: 距離行列からMDSで近似座標を生成
             plot_route_from_matrix(
                 distance_matrix=cfg["distance_matrix"],
                 city_names=cfg["city_names"],
@@ -998,9 +950,6 @@ def main() -> None:
         )
     except Exception as e:
         print(f"  ⚠️  成功率グラフの生成に失敗しました: {e}")
-        import traceback
-
-        traceback.print_exc()
 
     print("\n回路図を生成中...")
     try:
@@ -1039,7 +988,32 @@ def main() -> None:
     except Exception as e:
         print(f"  ⚠️  比較アニメーション生成に失敗しました: {e}")
 
-    # HTMLレポート生成
+    print("\n振幅バーチャートアニメーションを生成中...")
+    try:
+        run_amplitude(
+            problem=problem,
+            threshold=grover_result["best_cost"],
+            save_path=output_dir / "amplitude_animation.gif" if output_dir else None,
+            target_bitstrings=None,  # threshold から自動計算（全有効解）
+            fps=2,
+        )
+    except Exception as e:
+        print(f"  ⚠️  振幅バーチャート生成に失敗しました: {e}")
+
+    print("\nブロッホ球アニメーションを生成中...")
+    try:
+        run_bloch(
+            problem=problem,
+            threshold=grover_result["best_cost"],
+            save_path=output_dir / "bloch_animation.gif" if output_dir else None,
+            target_bitstrings=None,  # threshold から自動計算（全有効解）
+            fps=cfg.get("bloch_fps", 1.2),
+            elev=cfg.get("bloch_elev", 22),
+            azim=cfg.get("bloch_azim", -60),
+        )
+    except Exception as e:
+        print(f"  ⚠️  ブロッホ球アニメーション生成に失敗しました: {e}")
+
     if output_dir:
         print("\nHTMLレポートを生成中...")
         try:
