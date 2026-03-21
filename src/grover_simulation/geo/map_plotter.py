@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.ticker as mticker
 
 
 # ---------------------------------------------------------------------------
@@ -229,13 +230,21 @@ def plot_route(
     ax.set_xlim(min(xs) - margin_x, max(xs) + margin_x)
     ax.set_ylim(min(ys) - margin_y, max(ys) + margin_y)
 
+    # OpenStreetMap タイルの取得を試みる
+    tile_ok = False
     try:
+        import contextily as ctx
+
         ctx.add_basemap(
             ax, crs="EPSG:3857", source=ctx.providers.OpenStreetMap.Mapnik, zoom=zoom
         )
-    except Exception:
-        print("  ⚠️  地図タイルの取得に失敗しました。背景なしで描画します。")
+        tile_ok = True
+    except Exception as tile_err:
+        print(f"  ⚠️  地図タイルの取得に失敗しました。背景なしで描画します。")
+
+    if not tile_ok:
         ax.set_facecolor("#e8f4f8")
+        ax.grid(True, alpha=0.25, linestyle="--", color="#90aec0")
 
     _draw_route(ax, mercator, route_names)
     ax.set_title(title, fontsize=13, fontweight="bold", pad=12)
@@ -253,7 +262,7 @@ def plot_route_from_matrix(
     distance_matrix: list[list[float]],
     city_names: list[str],
     best_route: str,
-    title: str = "Optimal Route (Approximate Layout)",
+    title: str = "Optimal Route (Distance-based Layout)",
     save_path: str | Path | None = None,
 ) -> None:
     """距離行列から MDS で近似座標を生成してルートを描画する。

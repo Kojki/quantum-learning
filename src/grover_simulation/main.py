@@ -54,6 +54,7 @@ from quantum.noise import (
 )
 from benchmark.metrics import compare
 from visualizer.animation import run as run_animation
+from visualizer.circuit_drawer import draw_circuits
 from visualizer.state_plotter import run as run_race
 from geo.geocoder import geocode_cities
 from geo.distance import build_distance_matrix
@@ -204,11 +205,17 @@ def _plot_success_rate(
             noise_model=noise_model,
         )
         if result.get("status") == "ok" and result.get("top_k"):
-            success_prob = sum(
-                e["probability"]
-                for e in result["top_k"]
-                if abs(e.get("cost", float("inf")) - best_cost) < 1e-6
-            )
+            # 正解ビット列の確率を合計
+            # best_bitstring が一致するものを正解とみなす
+            best_bs = result.get("best_bitstring", "")
+            # feasible かつコストが best_cost 以下のものを正解とする
+            success_prob = 0.0
+            for e in result["top_k"]:
+                bs = e.get("bitstring", "")
+                if problem.is_feasible(bs):
+                    cost = problem.cost(bs)
+                    if cost <= best_cost + 1e-6:
+                        success_prob += e["probability"]
         else:
             success_prob = 0.0
         success_rates.append(success_prob)
@@ -488,7 +495,7 @@ def _generate_html_report(
             return "<p>No history</p>"
         rows = "<tr><th>Iter</th><th>Cost</th><th>Route</th><th>Improved</th></tr>"
         for h in history:
-            mark = "✓" if h.get("improved") else "—"
+            mark = "★" if h.get("improved") else "—"
             color = "#16a34a" if h.get("improved") else "#888"
             rows += (
                 f"<tr><td>{h['iteration']}</td><td>{h['threshold']:.1f}</td>"
@@ -647,6 +654,21 @@ def _generate_html_report(
     <h2>Route Map</h2>
     {img_tag("route_map.png", "Route Map")}
     {mds_note}
+  </section>
+  <section>
+    <h2>Circuit Diagrams</h2>
+    <h3>Overview (1 iteration)</h3>
+    {img_tag("circuit_overview.png", "Circuit Overview")}
+    <div class="two-col" style="margin-top:1rem;">
+      <div>
+        <h3>Oracle</h3>
+        {img_tag("circuit_oracle.png", "Oracle Circuit")}
+      </div>
+      <div>
+        <h3>Diffusion</h3>
+        {img_tag("circuit_diffusion.png", "Diffusion Circuit")}
+      </div>
+    </div>
   </section>
   <section>
     <h2>Animations</h2>
@@ -889,6 +911,17 @@ def main() -> None:
             except Exception as e:
                 print(f"  ⚠️  レポート生成に失敗しました: {e}")
 
+        # 回路図（問題依存・ノイズ非依存なので all モードでも生成）
+        print("\n回路図を生成中...")
+        try:
+            draw_circuits(
+                problem=problem,
+                threshold=bf_result["best_cost"],
+                output_dir=output_dir,
+            )
+        except Exception as e:
+            print(f"  ⚠️  回路図の生成に失敗しました: {e}")
+
         print("\nすべての出力が完了しました。")
         if output_dir:
             print(f"保存先: {output_dir.resolve()}")
@@ -968,6 +1001,16 @@ def main() -> None:
         import traceback
 
         traceback.print_exc()
+
+    print("\n回路図を生成中...")
+    try:
+        draw_circuits(
+            problem=problem,
+            threshold=grover_result["best_cost"],
+            output_dir=output_dir,
+        )
+    except Exception as e:
+        print(f"  ⚠️  回路図の生成に失敗しました: {e}")
 
     print("\n確率変化アニメーションを生成中...")
     try:

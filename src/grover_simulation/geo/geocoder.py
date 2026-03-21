@@ -64,11 +64,17 @@ def _build_query(name: str) -> str:
 
     例: 「東京」→「東京, Japan」
     """
-    # 日本語を含む場合は Japan を付加
+    # 日本語を含む場合は精度向上のため「市」を付加してから Japan を付加
     if _contains_japanese(name):
-        # すでに国名が含まれていれば付加しない
         if "Japan" not in name and "日本" not in name:
-            return f"{name}, Japan"
+            # 「市」「区」「町」「村」「県」が含まれていない場合は「市」を付加
+            # 例: 「福岡」→「福岡市, Japan」（福岡市が福岡県より優先される）
+            suffix = ""
+            if not any(
+                c in name for c in ["市", "区", "町", "村", "県", "都", "道", "府"]
+            ):
+                suffix = "市"
+            return f"{name}{suffix}, Japan"
         return name
 
     # キーワードテーブルで検索
@@ -122,8 +128,20 @@ def geocode_cities(
                 location = geolocator.geocode(name, language=language)
 
             if location is not None:
+                addr = location.address or ""
+                # 「町」「村」「郡」が含まれる場合は小地名の可能性 → 再検索
+                if any(c in addr for c in ["町", "郡"]) and "市" not in addr:
+                    print(
+                        f"  ↩  '{name}': 小地名 ({addr[:40]}...) の可能性。都市名を明示して再検索..."
+                    )
+                    retry_q = f"{name}市, Japan"
+                    retry_loc = geolocator.geocode(retry_q, language=language)
+                    if retry_loc is not None:
+                        location = retry_loc
+                        addr = retry_loc.address or ""
+                        time.sleep(wait_sec)
+
                 coords[name] = (location.latitude, location.longitude)
-                addr = location.address
                 addr_short = addr[:70] + ("..." if len(addr) > 70 else "")
                 print(
                     f"  取得成功: {name} → ({location.latitude:.4f}, {location.longitude:.4f})"

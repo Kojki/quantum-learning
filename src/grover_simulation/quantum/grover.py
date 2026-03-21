@@ -297,10 +297,20 @@ def solve(
             **ancilla_info,
         }
 
-    top_k_list = [
-        {"bitstring": bs, "count": cnt, "probability": round(cnt / shots, 4)}
-        for bs, cnt in sorted(normalized.items(), key=lambda x: -x[1])[:top_k]
-    ]
+    top_k_list = []
+    for bs, cnt in sorted(normalized.items(), key=lambda x: -x[1])[:top_k]:
+        entry = {
+            "bitstring": bs,
+            "count": cnt,
+            "probability": round(cnt / shots, 4),
+        }
+        # cost も格納しておく（成功率グラフの判定に使用）
+        if problem.is_feasible(bs):
+            try:
+                entry["cost"] = problem.cost(bs)
+            except Exception:
+                pass
+        top_k_list.append(entry)
 
     return {
         "status": "ok",
