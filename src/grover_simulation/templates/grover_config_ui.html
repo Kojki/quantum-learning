@@ -175,11 +175,10 @@ const DEVICES = {
   },
 };
 
-
 let S = {
   step: 0, configMode: 'interactive', cityMode: 'sample', sampleId: '1',
   cityCount: 4, cityNames: ['東京', '大阪', '名古屋', '福岡'], useGeo: true, distMatrix: [],
-  maxIter: 2, shots: 1024, ancilla: 'single', noise: 'ideal', device: 'eagle_r3',
+  maxIter: 2, shots: 1024, ancilla: 'single', noise: 'combined', device: 'eagle_r3',
   distMode: 'pair', coords: {}, geocodeDone: false, seed: 42, outputDir: 'output'
 };
  
@@ -229,7 +228,7 @@ function matrixNav(e, row, col, n) {
   const DIRS = { ArrowUp: [-1,0], ArrowDown: [1,0], ArrowLeft: [0,-1], ArrowRight: [0,1] };
   const dir = DIRS[e.key];
   if (!dir) return;
-  e.preventDefault(); // デフォルト動作（数値変更・カーソル移動）を抑止
+  e.preventDefault(); // デフォルト動作（数値変更・カー বিস্ত・カーソル移動）を抑止
 
   let r = row + dir[0];
   let c = col + dir[1];
@@ -417,6 +416,19 @@ const STEP_CONTENT = [
   () => `
     <h2>Grover シミュレーター</h2>
     <p class="step-desc">設定の入力方法を選んでください。</p>
+
+    <div class="alert-warn" style="margin-bottom: 1.5rem; background-color: #fffbeb; border: 1px solid #fcd34d; padding: 1rem; border-radius: 8px;">
+        <div style="font-size: 1.2rem; margin-right: 0.5rem; margin-top: 0.1rem;">⚠️</div>
+        <div>
+            <h3 style="font-size: 14px; font-weight: 600; color: #92400e; margin-bottom: 0.5rem;">シミュレーションの制約に関する注意</h3>
+            <p style="font-size: 13px; color: #92400e; line-height: 1.5; margin: 0;">
+                現在のこのUIを用いたTSPシミュレーションでは、アルゴリズムの挙動（振幅増幅など）を分かりやすく観察するために、<strong>「あらかじめ古典的に全ての経路コストを計算し、正解となる経路にだけ印を付けるオラクル」</strong>を使用しています（所謂「カンニング」状態です）。<br><br>
+                本来の量子探索では、距離の合算やしきい値との比較を量子ゲートのみで行う「算術演算オラクル」が必要ですが、それを構築すると回路が極端に深くなり、ノイズのある実機シミュレーションでは結果を得ることが困難になります。<br>
+                本シミュレーションは、Groverのアルゴリズムの動作原理と実機ノイズの影響を学ぶための教育目的の実装である点にご留意ください。
+            </p>
+        </div>
+    </div>
+
     <div class="section">
       ${optCard('configMode','interactive','ステップ形式で設定する','各パラメータをひとつずつ設定します。詳しい説明を確認しながら進められるので、はじめての方にもおすすめです。')}
       ${optCard('configMode','file','config.py の設定をそのまま使う','設定ファイルの値をそのまま読み込んで実行します。すでに試した設定を再利用するときに便利です。')}
@@ -432,7 +444,7 @@ const STEP_CONTENT = [
             <div class="sample-name">${s.label}</div>
             <div class="sample-cities">${s.cities.join(' · ')}</div>
           </div>
-          ${s.useGeo?'<span class="tag-geo">座標自動取得</span>':'<span class="tag-manual">距離手動</span>'}
+          ${s.useGeo?'<span class="tag-geo">座標自動取得</span>':'<span class="tag-manual">距離手手動</span>'}
         </div>`).join('');
     } else if (S.cityMode === 'count') {
       const names = Array.from({length: S.cityCount}, (_,i) => String.fromCharCode(65+i));

@@ -9,6 +9,7 @@ from qiskit.circuit import Gate
 from qiskit_aer import AerSimulator
 
 from quantum.oracle import build_oracle, make_condition_from_cost
+from .hcg_gate import build_hcg_gate  # 追加: HCgゲートのインポート
 
 if TYPE_CHECKING:
     from problems.base import OptimizationProblem
@@ -42,6 +43,30 @@ def build_diffusion(n_qubits: int) -> Gate:
     circuit.h(range(n_qubits))
 
     return circuit.to_gate(label="Diffusion")
+
+
+def build_hcg_diffusion(n_cities: int) -> Gate:
+    """HCg 状態を軸とした反射を行うディフューザーを構築する。
+
+    D_hcg = A_hcg (2|0><0| - I) A_hcg^†
+    """
+    m_bits = math.ceil(math.log2(n_cities))
+    n_qubits = n_cities * m_bits
+    hcg = build_hcg_gate(n_cities)
+
+    circuit = QuantumCircuit(n_qubits)
+    circuit.append(hcg.inverse(), range(n_qubits))
+
+    # 2|0><0| - I の実現
+    circuit.x(range(n_qubits))
+    circuit.h(n_qubits - 1)
+    circuit.mcx(list(range(n_qubits - 1)), n_qubits - 1)
+    circuit.h(n_qubits - 1)
+    circuit.x(range(n_qubits))
+
+    circuit.append(hcg, range(n_qubits))
+
+    return circuit.to_gate(label="HCg_Diffusion")
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +104,30 @@ def build_grover_circuit(
     for _ in range(n_iterations):
         circuit.append(oracle, list(range(n_qubits + 1)))
         circuit.append(diffusion, list(range(n_qubits)))
+    circuit.measure(range(n_qubits), range(n_qubits))
+    return circuit
+
+
+def build_grover_circuit_hcg(
+    n_cities: int,
+    oracle: Gate,
+    n_iterations: int,
+) -> QuantumCircuit:
+    """HCg を使った Grover 回路を構築する。"""
+    m_bits = math.ceil(math.log2(n_cities))
+    n_qubits = n_cities * m_bits
+    circuit = QuantumCircuit(n_qubits + 1, n_qubits)
+
+    # 初期状態生成 (HCg)
+    hcg = build_hcg_gate(n_cities)
+    circuit.append(hcg, range(n_qubits))
+
+    diffusion = build_hcg_diffusion(n_cities)
+
+    for _ in range(n_iterations):
+        circuit.append(oracle, list(range(n_qubits + 1)))
+        circuit.append(diffusion, list(range(n_qubits)))
+
     circuit.measure(range(n_qubits), range(n_qubits))
     return circuit
 
@@ -182,6 +231,7 @@ def solve(
     ancilla_mode: str = "single",
     noise_model=None,
     seed: int | None = None,
+    search_mode: str = "standard",  # 追加: "standard" | "hcg"
 ) -> dict:
     """Grover のアルゴリズムで最適解を探索する（単発）。
 
@@ -195,6 +245,7 @@ def solve(
         ancilla_mode: 'single' | 'extra' | 'compare'
         noise_model: Qiskit Aer のノイズモデル（省略時はノイズなし）
         seed: 乱数シード
+        search_mode: "standard" または "hcg"（HCgゲートを使用するか）
     """
     if ancilla_mode not in ("single", "extra", "compare"):
         raise ValueError(
@@ -229,7 +280,11 @@ def solve(
     if n_iterations is None:
         n_iterations = optimal_iterations(n_qubits, n_targets)
 
-    if ancilla_mode == "single":
+    if search_mode == "hcg":
+        n_cities = getattr(problem, "n_cities", 3)
+        circuit = build_grover_circuit_hcg(n_cities, oracle, n_iterations)
+        ancilla_info = {"mode": "hcg", "n_ancilla": 1, "n_qubits_total": n_qubits + 1}
+    elif ancilla_mode == "single":
         circuit = build_grover_circuit(n_qubits, oracle, n_iterations)
         ancilla_info = {
             "mode": "single",
